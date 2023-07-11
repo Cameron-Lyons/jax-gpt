@@ -3,6 +3,10 @@ import jax.numpy as jnp
 from typing import List, Dict, Any
 
 
+def attention(q: jnp.array, k: jnp.array, v: jnp.array) -> jnp.array:
+    return softmax(q @ k.T / jnp.sqrt(q.shape[-1])) @ v
+
+
 def ffn(x, c_fc, c_proj):
     a = gelu(linear(x, **c_fc))
     x = linear(a, **c_proj)
