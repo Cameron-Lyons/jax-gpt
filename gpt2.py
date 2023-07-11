@@ -3,6 +3,23 @@ import jax.numpy as jnp
 from typing import List, Dict, Any
 
 
+def gpt2(
+        inputs: List[int],
+        wte: jnp.array,
+        wpe,
+        blocks: Dict,
+        ln_f,
+        n_head: int
+):
+    x = wte[inputs] + wpe(range(len(inputs)))
+
+    for block in blocks:
+        x = transformer_block(x, **block, n_head=n_head)
+
+    x = layer_norm(x, **ln_f)
+    return x @ wte.T
+
+
 def generate(
         inputs: List[int],
         params: Dict[Any, Any],
