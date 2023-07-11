@@ -19,6 +19,17 @@ def causal_self_attention(x: jnp.array,
     return linear(x, **c_proj)
 
 
+def multihead_attn(x: jnp.array, c_attn: jnp.array, c_proj: jnp.array, n_head: int) -> jnp.array:
+    x = linear(x, **c_attn)
+    qkv = jnp.split(x, 3, axis=-1)
+    qkv_heads = list(map(lambda x: jnp.split(x, n_head, axis=1), qkv))
+    causal_mask = (1-jnp.tri(x.shape[0]), dtype=x.dtype)
+    out_heads = [attention(q, k, v, causal_mask)
+                 for q, k, v in zip(*qkv_heads)]
+    x = jnp.hstack(out_heads)
+    return linear(x, **c_proj)
+
+
 def ffn(x, c_fc, c_proj):
     a = gelu(linear(x, **c_fc))
     x = linear(a, **c_proj)
@@ -83,6 +94,6 @@ def main(prompt: str,
     return output_text
 
 
-if __name__ == '__main__'
+if __name__ == '__main__':
 
-fire.Fire(main)
+    fire.Fire(main)
