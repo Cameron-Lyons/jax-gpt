@@ -8,15 +8,11 @@ def attention(q: jnp.array, k: jnp.array, v: jnp.array) -> jnp.array:
 
 
 def self_attention(x: jnp.array,
-                   w_k: jnp.array,
-                   w_q: jnp.array,
-                   w_v: jnp.array,
+                   w_fc: jnp.array,
                    w_proj: jnp.array):
-    q = x @ w_k
-    k = x @ w_q
-    v = x @ w_v
-
-    x = attention(x)
+    x = x @ w_fc
+    q, k, v = jnp.split(x, 3, axis=1)
+    x = attention(q, k, v)
 
     return x @ w_proj
 
