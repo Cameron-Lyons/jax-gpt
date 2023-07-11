@@ -69,18 +69,16 @@ def gpt2(
 
 def generate(
         inputs: List[int],
-        params: Dict[Any, Any],
-        n_head: int,
-        n_tokens_to_generate: int
+        eos_id: int,
+        max_seq_len: int
 ) -> List[int]:
-    from tqdm import tqdm
 
-    for _ in tqdm(range(n_tokens_to_generate), "generating"):
-        logits = gpt2(inputs, **params, n_head=n_head)
-        next_id = jnp.argmax(logits[-1])
+    promt_len = len(inputs)
+    while inputs[-1] != eos_id and len(inputs) < max_seq_len:
+        output = gpt2(inputs)
+        next_id = jnp.argmax(output[-1])
         inputs.append(int(next_id))
-
-    return inputs[len(inputs)-n_tokens_to_generate:]
+    return inputs[promt_len:]
 
 
 def main(prompt: str,
