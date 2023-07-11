@@ -16,3 +16,21 @@ def generate(
         inputs.append(int(next_id))
 
     return inputs[len(inputs)-n_tokens_to_generate:]
+
+
+def main(prompt: str,
+         n_tokens_to_generate: int = 40,
+         model_size: str = '124M',
+         models_dir: str = 'models'):
+    from utils import load_encoder_hparams_and_params
+
+    encoder, hparams, params = load_encoder_hparams_and_params(
+        model_size, models_dir)
+    input_ids = encoder.encode(prompt)
+    assert len(input_ids) + n_tokens_to_generate < hparams['n_ctx']
+
+    output_ids = generate(
+        input_ids, params, hparams['n_head'], n_tokens_to_generate)
+    output_text = encoder.decode(output_ids)
+
+    return output_text
