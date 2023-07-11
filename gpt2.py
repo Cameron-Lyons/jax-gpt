@@ -3,6 +3,13 @@ import jax.numpy as jnp
 from typing import List, Dict, Any
 
 
+def transformer_block(x, mlp, attn, ln_1, ln_2, n_head):
+    x = x + mha(layer_norm(x, **ln_1), **attn, n_head=n_head)
+    x = x + ffn(layer_norm(x, **ln_2), **mlp)
+
+    return x
+
+
 def gpt2(
         inputs: List[int],
         wte: jnp.array,
