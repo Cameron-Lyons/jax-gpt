@@ -3,11 +3,11 @@ from typing import List, Dict, Any
 
 
 def generate(
-        inputs: List[str],
+        inputs: List[int],
         params: Dict[Any, Any],
         n_head: int,
         n_tokens_to_generate: int
-) -> List[str]:
+) -> List[int]:
     from tqdm import tqdm
 
     for _ in tqdm(range(n_tokens_to_generate), "generating"):
