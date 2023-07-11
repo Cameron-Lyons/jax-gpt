@@ -1,3 +1,4 @@
+import fire
 import jax.numpy as jnp
 from typing import List, Dict, Any
 
@@ -34,3 +35,8 @@ def main(prompt: str,
     output_text = encoder.decode(output_ids)
 
     return output_text
+
+
+if __name__ == '__main__'
+
+fire.Fire(main)
