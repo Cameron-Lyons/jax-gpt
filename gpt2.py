@@ -7,9 +7,9 @@ def attention(q: jnp.array, k: jnp.array, v: jnp.array, mask: jnp.array) -> jnp.
     return softmax(q @ k.T / jnp.sqrt(q.shape[-1]) + mask) @ v
 
 
-def self_attention(x: jnp.array,
-                   c_attn: jnp.array,
-                   c_proj: jnp.array):
+def causal_self_attention(x: jnp.array,
+                          c_attn: jnp.array,
+                          c_proj: jnp.array):
     x = linear(x, **c_attn)
 
     q, k, v = jnp.split(x, 3, axis=1)
