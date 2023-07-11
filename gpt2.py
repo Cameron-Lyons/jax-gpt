@@ -3,6 +3,13 @@ import jax.numpy as jnp
 from typing import List, Dict, Any
 
 
+def lm_loss(params, inputs, n_head) -> float:
+    x, y = inputs[:-1], inputs[1:]
+    output = gpt2(x, ** params, n_head=n_head)
+    loss = jnp.mean(-jnp.log(output[y]))
+    return loss
+
+
 def attention(q: jnp.array, k: jnp.array, v: jnp.array, mask: jnp.array) -> jnp.array:
     return softmax(q @ k.T / jnp.sqrt(q.shape[-1]) + mask) @ v
 
