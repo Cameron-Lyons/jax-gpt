@@ -7,6 +7,10 @@ def attention(q: jnp.array, k: jnp.array, v: jnp.array) -> jnp.array:
     return softmax(q @ k.T / jnp.sqrt(q.shape[-1])) @ v
 
 
+def self_attention(x: jnp.array):
+    return attention(x, x, x)
+
+
 def ffn(x, c_fc, c_proj):
     a = gelu(linear(x, **c_fc))
     x = linear(a, **c_proj)
