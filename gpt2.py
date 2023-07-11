@@ -7,8 +7,18 @@ def attention(q: jnp.array, k: jnp.array, v: jnp.array) -> jnp.array:
     return softmax(q @ k.T / jnp.sqrt(q.shape[-1])) @ v
 
 
-def self_attention(x: jnp.array):
-    return attention(x, x, x)
+def self_attention(x: jnp.array,
+                   w_k: jnp.array,
+                   w_q: jnp.array,
+                   w_v: jnp.array,
+                   w_proj: jnp.array):
+    q = x @ w_k
+    k = x @ w_q
+    v = x @ w_v
+
+    x = attention(x)
+
+    return x @ w_proj
 
 
 def ffn(x, c_fc, c_proj):
