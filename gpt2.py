@@ -23,6 +23,14 @@ def gelu(x: jnp.array) -> jnp.array:
     return 0.5 * x * (1 + jnp.tanh(jnp.sqrt(2 / jnp.pi) * (x + 0.044715 * x**3)))
 
 
+def layer_norm(
+    x: jnp.array, g: jnp.array, b: jnp.array, eps: float = 1e-5
+) -> jnp.array:
+    mean = jnp.mean(x, axis=-1, keepdims=True)
+    std = jnp.std(x, axis=-1, keepdims=True)
+    return g * (x - mean) / (std + eps) + b
+
+
 def attention(q: jnp.array, k: jnp.array, v: jnp.array, mask: jnp.array) -> jnp.array:
     return softmax(q @ k.T / jnp.sqrt(q.shape[-1]) + mask) @ v
 
@@ -56,7 +64,7 @@ def ffn(x, c_fc, c_proj):
 
 
 def transformer_block(x, mlp, attn, ln_1, ln_2, n_head):
-    x = x + mha(layer_norm(x, **ln_1), **attn, n_head=n_head)
+    x = x + multihead_attn(layer_norm(x, **ln_1), **attn, n_head=n_head)
     x = x + ffn(layer_norm(x, **ln_2), **mlp)
 
     return x
