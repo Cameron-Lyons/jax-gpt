@@ -3,7 +3,7 @@ import os
 from functools import lru_cache
 
 import regex as re
-from typing import Dict, Set, Tuple
+from typing import Dict, Set, Tuple, List
 
 
 @lru_cache()
@@ -60,7 +60,7 @@ class Encoder:
             r"""'s|'t|'re|'ve|'m|'ll|'d| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
         )
 
-    def bpe(self, token: str) -> str:
+    def bpe(self, token: int) -> str:
         if token in self.cache:
             return self.cache[token]
         word = tuple(token)
@@ -100,3 +100,12 @@ class Encoder:
         word = " ".join(word)
         self.cache[token] = word
         return word
+
+    def encode(self, text: str) -> List[int]:
+        bpe_tokens = []
+        for token in re.findall(self.pat, text):
+            token = "".join(self.byte_encoder[b] for b in token.encode("utf-8"))
+            bpe_tokens.extend(
+                self.encoder[bpe_token] for bpe_token in self.bpe(token).split(" ")
+            )
+        return bpe_tokens
