@@ -123,3 +123,16 @@ class Encoder:
             "utf-8", errors=self.errors
         )
         return text
+
+
+def get_encoder(
+    model_name: Literal["124M", "355M", "774M", "1558M"], models_dir: str
+) -> Encoder:
+    with open(os.path.join(models_dir, model_name, "encoder.json"), "r") as f:
+        encoder = json.load(f)
+    with open(
+        os.path.join(models_dir, model_name, "vocab.bpe"), "r", encoding="utf-8"
+    ) as f:
+        bpe_data = f.read()
+    bpe_merges = [tuple(merge_str.split()) for merge_str in bpe_data.split("\n")[1:-1]]
+    return Encoder(encoder=encoder, bpe_merges=bpe_merges)
