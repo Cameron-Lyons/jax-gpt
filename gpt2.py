@@ -14,6 +14,11 @@ def linear(x: jnp.array, w: jnp.array, b: jnp.array) -> jnp.array:
     return x @ w + b
 
 
+def softmax(x: jnp.array) -> jnp.array:
+    exp_x = jnp.exp(x - jnp.max(x, axis=-1, keepdims=True))
+    return exp_x / jnp.sum(exp_x, axis=-1, keepdims=True)
+
+
 def attention(q: jnp.array, k: jnp.array, v: jnp.array, mask: jnp.array) -> jnp.array:
     return softmax(q @ k.T / jnp.sqrt(q.shape[-1]) + mask) @ v
 
