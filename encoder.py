@@ -3,7 +3,7 @@ import os
 from functools import lru_cache
 
 import regex as re
-from typing import Dict, Set, Tuple, List
+from typing import Dict, Set, Tuple, List, Literal
 
 
 @lru_cache()
@@ -46,14 +46,21 @@ def get_pairs(word: Tuple[str]) -> Set[str]:
 
 
 class Encoder:
-    def __init__(self, encoder, bpe_merges, errors="replace"):
-        self.encoder = encoder
-        self.decoder = {v: k for k, v in self.encoder.items()}
-        self.errors = errors  # how to handle errors in decoding
+    def __init__(
+        self,
+        encoder: Dict[str, int],
+        bpe_merges,
+        errors: Literal["replace", "strict", "ignore"] = "replace",
+    ):
+        self.encoder: Dict[str, int] = encoder
+        self.decoder: Dict[int, str] = {v: k for k, v in self.encoder.items()}
+        self.errors: Literal[
+            "replace", "strict", "ignore"
+        ] = errors  # how to handle errors in decoding
         self.byte_encoder = bytes_to_unicode()
-        self.byte_decoder = {v: k for k, v in self.byte_encoder.items()}
-        self.bpe_ranks = dict(zip(bpe_merges, range(len(bpe_merges))))
-        self.cache = {}
+        self.byte_decoder: Dict[str, str] = {v: k for k, v in self.byte_encoder.items()}
+        self.bpe_ranks: Dict = dict(zip(bpe_merges, range(len(bpe_merges))))
+        self.cache: Dict[int, str] = {}
 
         # Should have added re.IGNORECASE so BPE merges can happen for capitalized versions of contractions
         self.pat = re.compile(
