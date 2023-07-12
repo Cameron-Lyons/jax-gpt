@@ -3,10 +3,11 @@ import os
 from functools import lru_cache
 
 import regex as re
+from typing import Dict, Set, Tuple
 
 
 @lru_cache()
-def bytes_to_unicode():
+def bytes_to_unicode() -> Dict[str, str]:
     """
     Returns list of utf-8 byte and a corresponding list of unicode strings.
     The reversible bpe codes work on unicode strings.
@@ -32,7 +33,7 @@ def bytes_to_unicode():
     return dict(zip(bs, cs))
 
 
-def get_pairs(word):
+def get_pairs(word: Tuple[str]) -> Set[str]:
     """Return set of symbol pairs in a word.
     Word is represented as tuple of symbols (symbols being variable-length strings).
     """
