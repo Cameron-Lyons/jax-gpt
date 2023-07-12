@@ -19,6 +19,10 @@ def softmax(x: jnp.array) -> jnp.array:
     return exp_x / jnp.sum(exp_x, axis=-1, keepdims=True)
 
 
+def gelu(x: jnp.array) -> jnp.array:
+    return 0.5 * x * (1 + jnp.tanh(jnp.sqrt(2 / jnp.pi) * (x + 0.044715 * x**3)))
+
+
 def attention(q: jnp.array, k: jnp.array, v: jnp.array, mask: jnp.array) -> jnp.array:
     return softmax(q @ k.T / jnp.sqrt(q.shape[-1]) + mask) @ v
 
