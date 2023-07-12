@@ -10,6 +10,10 @@ def lm_loss(params, inputs, n_head) -> float:
     return loss
 
 
+def linear(x: jnp.array, w: jnp.array, b: jnp.array) -> jnp.array:
+    return x @ w + b
+
+
 def attention(q: jnp.array, k: jnp.array, v: jnp.array, mask: jnp.array) -> jnp.array:
     return softmax(q @ k.T / jnp.sqrt(q.shape[-1]) + mask) @ v
 
