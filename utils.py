@@ -56,7 +56,7 @@ def load_gpt2_params_from_tf_ckpt(
 
     params = {"blocks": [{} for _ in range(hparams["n_layer"])]}
     for name, _ in tf.train.list_variables(tf_ckpt_path):
-        array = np.squeeze(tf.train.load_variable(tf_ckpt_path, name))
+        array = jnp.squeeze(tf.train.load_variable(tf_ckpt_path, name))
         name = name[len("model/") :]
         if name.startswith("h"):
             m = re.match(r"h([0-9]+)/(.*)", name)
@@ -67,3 +67,22 @@ def load_gpt2_params_from_tf_ckpt(
             set_in_nested_dict(params, name.split("/"), array)
 
     return params
+
+
+def load_encoder_hparams_and_params(
+    model_size: Literal["124M", "355M", "774M", "1558M"], models_dir: str
+):
+    assert model_size in ["124M", "355M", "774M", "1558M"]
+
+    model_dir = os.path.join(models_dir, model_size)
+    tf_ckpt_path = tf.train.latest_checkpoint(model_dir)
+    if not tf_ckpt_path:  # download files if necessary
+        os.makedirs(model_dir, exist_ok=True)
+        download_gpt2_files(model_size, model_dir)
+        tf_ckpt_path = tf.train.latest_checkpoint(model_dir)
+
+    encoder = get_encoder(model_size, models_dir)
+    hparams = json.load(open(os.path.join(model_dir, "hparams.json")))
+    params = load_gpt2_params_from_tf_ckpt(tf_ckpt_path, hparams)
+
+    return encoder, hparams, params
