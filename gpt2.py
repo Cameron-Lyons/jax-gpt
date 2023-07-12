@@ -1,6 +1,6 @@
 import fire
 import jax.numpy as jnp
-from typing import List, Dict, Any
+from typing import List, Dict
 
 
 def lm_loss(params, inputs, n_head) -> float:
