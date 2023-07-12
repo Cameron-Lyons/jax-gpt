@@ -43,7 +43,9 @@ def download_gpt2_files(
                     pbar.update(chunk_size)
 
 
-def load_gpt2_params_from_tf_ckpt(tf_ckpt_path: str, hparams: Dict[str, Any]]):
+def load_gpt2_params_from_tf_ckpt(
+    tf_ckpt_path: str, hparams: Dict[str, Any]
+) -> Dict[str, Any]:
     def set_in_nested_dict(d, keys, val):
         if not keys:
             return val
