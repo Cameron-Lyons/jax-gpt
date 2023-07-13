@@ -47,12 +47,15 @@ def get_pairs(word: Tuple[str]) -> Set[str]:
 
 
 class Encoder:
+    """Encodes a string using the BPE encoding scheme"""
+
     def __init__(
         self,
         encoder: Dict[str, int],
         bpe_merges,
         errors: Literal["replace", "strict", "ignore"] = "replace",
     ):
+        """Initializes the encoder"""
         self.encoder: Dict[str, int] = encoder
         self.decoder: Dict[int, str] = {v: k for k, v in self.encoder.items()}
         self.errors: Literal[
@@ -68,7 +71,8 @@ class Encoder:
             r"""'s|'t|'re|'ve|'m|'ll|'d| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
         )
 
-    def bpe(self, token: int) -> str:
+    def byte_pair_encoding(self, token: int) -> str:
+        """Encode a token using the BPE encoding scheme"""
         if token in self.cache:
             return self.cache[token]
         word = tuple(token)
@@ -110,11 +114,13 @@ class Encoder:
         return word
 
     def encode(self, text: str) -> List[int]:
+        """Encode a string using the BPE encoding scheme"""
         bpe_tokens = []
         for token in re.findall(self.pat, text):
             token = "".join(self.byte_encoder[b] for b in token.encode("utf-8"))
             bpe_tokens.extend(
-                self.encoder[bpe_token] for bpe_token in self.bpe(token).split(" ")
+                self.encoder[bpe_token]
+                for bpe_token in self.byte_pair_encoding(token).split(" ")
             )
         return bpe_tokens
 
@@ -129,6 +135,7 @@ class Encoder:
 def get_encoder(
     model_name: Literal["124M", "355M", "774M", "1558M"], models_dir: str
 ) -> Encoder:
+    """Get the encoder for a given model"""
     with open(os.path.join(models_dir, model_name, "encoder.json"), "r") as f:
         encoder = json.load(f)
     with open(
