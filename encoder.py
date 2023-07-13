@@ -1,3 +1,4 @@
+"""Functions for encoding and decoding strings using a bpe model"""
 import json
 import os
 from functools import lru_cache

@@ -1,3 +1,4 @@
+"""Utilities for loading GPT-2 models from TF ckpt files."""
 import json
 import os
 import re

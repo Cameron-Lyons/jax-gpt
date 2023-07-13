@@ -1,3 +1,4 @@
+"""GPT-2 model. For text generation."""
 import jax.numpy as jnp
 from typing import List, Dict
 from utils import load_encoder_hparams_and_params
