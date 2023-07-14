@@ -1,10 +1,11 @@
 """GPT-2 model. For text generation."""
 import jax.numpy as jnp
+import jax
 from typing import List, Dict
 from utils import load_encoder_hparams_and_params
 
 
-def lm_loss(params, inputs, n_head) -> float:
+def lm_loss(params, inputs, n_head) -> jax.Array:
     """Cross-entropy loss for language models."""
     x, y = inputs[:-1], inputs[1:]
     output = gpt2(x, **params, n_head=n_head)
@@ -12,19 +13,19 @@ def lm_loss(params, inputs, n_head) -> float:
     return loss
 
 
-def linear(x: jnp.array, w: jnp.array, b: jnp.array) -> jnp.array:
+def linear(x: jax.Array, w: jax.Array, b: jax.Array) -> jax.Array:
     """Linear layer. Multiplies input by weight matrix and adds bias.
     For use in attention layers."""
     return x @ w + b
 
 
-def softmax(x: jnp.array) -> jnp.array:
+def softmax(x: jax.Array) -> jax.Array:
     """Softmax activation function."""
     exp_x = jnp.exp(x - jnp.max(x, axis=-1, keepdims=True))
     return exp_x / jnp.sum(exp_x, axis=-1, keepdims=True)
 
 
-def gelu(x: jnp.array) -> jnp.array:
+def gelu(x: jax.Array) -> jax.Array:
     """Gaussian Error Linear Unit activation function.
     See https://arxiv.org/abs/1606.08415.
     Improves learning over ReLU at near zero values
@@ -33,8 +34,8 @@ def gelu(x: jnp.array) -> jnp.array:
 
 
 def layer_norm(
-    x: jnp.array, g: jnp.array, b: jnp.array, eps: float = 1e-5
-) -> jnp.array:
+    x: jax.Array, g: jax.Array, b: jax.Array, eps: float = 1e-5
+) -> jax.Array:
     """Layer normalization.
     for consistent range to speed up training."""
     mean = jnp.mean(x, axis=-1, keepdims=True)
@@ -42,12 +43,12 @@ def layer_norm(
     return g * (x - mean) / (std + eps) + b
 
 
-def attention(q: jnp.array, k: jnp.array, v: jnp.array, mask: jnp.array) -> jnp.array:
+def attention(q: jax.Array, k: jax.Array, v: jax.Array, mask: jax.Array) -> jax.Array:
     """Scaled dot-product attention."""
     return softmax(q @ k.T / jnp.sqrt(q.shape[-1]) + mask) @ v
 
 
-def causal_self_attention(x: jnp.array, c_attn: jnp.array, c_proj: jnp.array):
+def causal_self_attention(x: jax.Array, c_attn: jax.Array, c_proj: jax.Array):
     """Attention layer with a causal mask to prevent attending to future tokens."""
     x = linear(x, **c_attn)
 
@@ -59,8 +60,8 @@ def causal_self_attention(x: jnp.array, c_attn: jnp.array, c_proj: jnp.array):
 
 
 def multihead_attn(
-    x: jnp.array, c_attn: jnp.array, c_proj: jnp.array, n_head: int
-) -> jnp.array:
+    x: jax.Array, c_attn: jax.Array, c_proj: jax.Array, n_head: int
+) -> jax.Array:
     """Multi-head attention layer.
     Splits input into n_head chunks and runs attention on each chunk."""
     x = linear(x, **c_attn)
@@ -89,7 +90,7 @@ def transformer_block(x, mlp, attn, ln_1, ln_2, n_head):
     return x
 
 
-def gpt2(inputs: List[int], wte: jnp.array, wpe, blocks: Dict, ln_f, n_head: int):
+def gpt2(inputs: List[int], wte: jax.Array, wpe, blocks: Dict, ln_f, n_head: int):
     """GPT-2 model. Consists of an embedding layer and a stack of transformer blocks."""
     x = wte[inputs] + wpe(range(len(inputs)))
 
