@@ -8,7 +8,7 @@ from typing import Dict, Set, Tuple, List, Literal
 
 
 @lru_cache()
-def bytes_to_unicode() -> Dict[str, str]:
+def bytes_to_unicode() -> Dict[int, str]:
     """
     Returns list of utf-8 byte and a corresponding list of unicode strings.
     The reversible bpe codes work on unicode strings.
@@ -61,17 +61,17 @@ class Encoder:
         self.errors: Literal[
             "replace", "strict", "ignore"
         ] = errors  # how to handle errors in decoding
-        self.byte_encoder = bytes_to_unicode()
-        self.byte_decoder: Dict[str, str] = {v: k for k, v in self.byte_encoder.items()}
+        self.byte_encoder: Dict[int, str] = bytes_to_unicode()
+        self.byte_decoder: Dict[str, int] = {v: k for k, v in self.byte_encoder.items()}
         self.bpe_ranks: Dict = dict(zip(bpe_merges, range(len(bpe_merges))))
-        self.cache: Dict[int, str] = {}
+        self.cache: Dict[str, str] = {}
 
         # Should have added re.IGNORECASE so BPE merges can happen for capitalized versions of contractions
         self.pat = re.compile(
             r"""'s|'t|'re|'ve|'m|'ll|'d| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
         )
 
-    def byte_pair_encoding(self, token: int) -> str:
+    def byte_pair_encoding(self, token: str) -> str:
         """Encode a token using the BPE encoding scheme"""
         if token in self.cache:
             return self.cache[token]
