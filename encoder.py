@@ -2,15 +2,15 @@
 import json
 import os
 from functools import lru_cache
-
-import regex as re
 from typing import Dict, Set, Tuple, List, Literal
+import regex as re
 
 
 @lru_cache()
 def bytes_to_unicode() -> Dict[int, str]:
     """
-    Returns list of utf-8 byte and a corresponding list of unicode strings.
+    Returns list of utf-8 byte and
+    a corresponding list of unicode strings.
     The reversible bpe codes work on unicode strings.
     This means you need a large # of unicode characters in your vocab if you want to avoid UNKs.
     When you're at something like a 10B token dataset you end up needing around 5K for decent coverage.
@@ -66,7 +66,8 @@ class Encoder:
         self.bpe_ranks: Dict = dict(zip(bpe_merges, range(len(bpe_merges))))
         self.cache: Dict[str, str] = {}
 
-        # Should have added re.IGNORECASE so BPE merges can happen for capitalized versions of contractions
+        # Should have added re.IGNORECASE
+        # so BPE merges can happen for capitalized versions of contractions
         self.pat = re.compile(
             r"""'s|'t|'re|'ve|'m|'ll|'d| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
         )
@@ -107,8 +108,7 @@ class Encoder:
             word = new_word
             if len(word) == 1:
                 break
-            else:
-                pairs = get_pairs(word)
+            pairs = get_pairs(word)
         word = " ".join(word)
         self.cache[token] = word
         return word
@@ -125,6 +125,7 @@ class Encoder:
         return bpe_tokens
 
     def decode(self, tokens: List[int]) -> str:
+        """Decode a list of BPE tokens into a string"""
         text = "".join([self.decoder[token] for token in tokens])
         text = bytearray([self.byte_decoder[c] for c in text]).decode(
             "utf-8", errors=self.errors

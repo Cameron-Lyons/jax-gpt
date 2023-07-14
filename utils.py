@@ -2,18 +2,18 @@
 import json
 import os
 import re
-
+from typing import Literal, Dict, Any
 import jax.numpy as jnp
 import requests
 import tensorflow as tf
 from tqdm import tqdm
-from typing import Literal, Dict, Any
 from encoder import get_encoder
 
 
 def download_gpt2_files(
     model_size: Literal["124M", "355M", "774M", "1558M"], model_dir: str
 ):
+    """Download the GPT-2 model files from OpenAI"""
     assert model_size in ["124M", "355M", "774M", "1558M"]
     for filename in [
         "checkpoint",
@@ -25,10 +25,10 @@ def download_gpt2_files(
         "vocab.bpe",
     ]:
         url = "https://openaipublic.blob.core.windows.net/gpt-2/models"
-        r = requests.get(f"{url}/{model_size}/{filename}", stream=True)
+        r = requests.get(f"{url}/{model_size}/{filename}", stream=True, timeout=10)
         r.raise_for_status()
 
-        with open(os.path.join(model_dir, filename), "wb") as f:
+        with open(os.path.join(model_dir, filename), "wb", encoding="utf-8") as f:
             file_size = int(r.headers["content-length"])
             chunk_size = 1000
             with tqdm(
@@ -47,7 +47,10 @@ def download_gpt2_files(
 def load_gpt2_params_from_tf_ckpt(
     tf_ckpt_path: str, hparams: Dict[str, Any]
 ) -> Dict[str, Any]:
+    """Load GPT-2 params from a TF checkpoint"""
+
     def set_in_nested_dict(d, keys, val):
+        """Set a value in a nested dict using a list of keys"""
         if not keys:
             return val
         if keys[0] not in d:
@@ -73,6 +76,7 @@ def load_gpt2_params_from_tf_ckpt(
 def load_encoder_hparams_and_params(
     model_size: Literal["124M", "355M", "774M", "1558M"], models_dir: str
 ):
+    """Load the encoder, hparams, and params for a given model size"""
     assert model_size in ["124M", "355M", "774M", "1558M"]
 
     model_dir = os.path.join(models_dir, model_size)
@@ -83,7 +87,8 @@ def load_encoder_hparams_and_params(
         tf_ckpt_path = tf.train.latest_checkpoint(model_dir)
 
     encoder = get_encoder(model_size, models_dir)
-    hparams = json.load(open(os.path.join(model_dir, "hparams.json")))
+    with open(os.path.join(model_dir, "hparams.json"), encoding="utf-8") as f:
+        hparams = json.load(f)
     params = load_gpt2_params_from_tf_ckpt(tf_ckpt_path, hparams)
 
     return encoder, hparams, params
