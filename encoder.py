@@ -12,8 +12,10 @@ def bytes_to_unicode() -> Dict[int, str]:
     Returns list of utf-8 byte and
     a corresponding list of unicode strings.
     The reversible bpe codes work on unicode strings.
-    This means you need a large # of unicode characters in your vocab if you want to avoid UNKs.
-    When you're at something like a 10B token dataset you end up needing around 5K for decent coverage.
+    This means you need a large # of unicode characters in your vocab
+    if you want to avoid UNKs.
+    When you're at something like a 10B token dataset
+    you end up needing around 5K for decent coverage.
     This is a significant percentage of your normal, say, 32K bpe vocab.
     To avoid that, we want lookup tables between utf-8 bytes and unicode strings.
     And avoids mapping to whitespace/control characters the bpe code barfs on.
@@ -137,7 +139,9 @@ def get_encoder(
     model_name: Literal["124M", "355M", "774M", "1558M"], models_dir: str
 ) -> Encoder:
     """Get the encoder for a given model"""
-    with open(os.path.join(models_dir, model_name, "encoder.json"), "r") as f:
+    with open(
+        os.path.join(models_dir, model_name, "encoder.json"), "r", encoding="utf-8"
+    ) as f:
         encoder = json.load(f)
     with open(
         os.path.join(models_dir, model_name, "vocab.bpe"), "r", encoding="utf-8"
