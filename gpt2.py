@@ -53,8 +53,8 @@ def causal_self_attention(x: jax.Array, c_attn: jax.Array, c_proj: jax.Array):
     x = linear(x, **c_attn)
 
     q, k, v = jnp.split(x, 3, axis=1)
-
-    x = attention(q, k, v)
+    mask: jax.Array = (1 - jnp.tri(x.shape[0], dtype=x.dtype)) * -1e10
+    x = attention(q, k, v, mask)
 
     return linear(x, **c_proj)
 
