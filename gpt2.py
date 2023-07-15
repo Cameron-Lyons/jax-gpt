@@ -1,5 +1,5 @@
 """GPT-2 model. For text generation."""
-from typing import List, Dict
+from typing import List, Dict, Any
 import jax.numpy as jnp
 import jax
 from utils import load_encoder_hparams_and_params
@@ -101,16 +101,15 @@ def gpt2(inputs: List[int], wte: jax.Array, wpe, blocks: Dict, ln_f, n_head: int
     return x @ wte.T
 
 
-def generate(inputs: List[int], eos_id: int, max_seq_len: int) -> List[int]:
-    """Generate text from a prompt.
-    Uses greedy decoding.
-    """
-    promt_len = len(inputs)
-    while inputs[-1] != eos_id and len(inputs) < max_seq_len:
-        output = gpt2(inputs)
-        next_id = jnp.argmax(output[-1])
+def generate(
+    inputs: List[int], params: Dict[str, Any], n_head: int, n_tokens_to_generate: int
+):
+    """Generate text from a prompt."""
+    for _ in range(n_tokens_to_generate):
+        logits = gpt2(inputs, **params, n_head=n_head)
+        next_id = jnp.argmax(logits[-1])
         inputs.append(int(next_id))
-    return inputs[promt_len:]
+    return inputs[len(inputs) - n_tokens_to_generate :]
 
 
 def main(
