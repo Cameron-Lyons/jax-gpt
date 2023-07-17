@@ -144,3 +144,10 @@ elif init_from.startswith("gpt2"):
     # read off the created config params, so we can store them into checkpoint correctly
     for k in ["n_layer", "n_head", "n_embd", "block_size", "bias", "vocab_size"]:
         model_args[k] = getattr(model.config, k)
+
+if block_size < model.config.block_size:
+    model.crop_block_size(block_size)
+    model_args[
+        "block_size"
+    ] = block_size  # so that the checkpoint will have the right value
+model.to(device)
