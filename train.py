@@ -66,3 +66,13 @@ train_data: jax.Array = jnp.load(
 val_data: jax.Array = jnp.load(
     os.path.join(data_dir, "val.bin"), dtype=jnp.uint16, mode="r"
 )
+
+
+def get_batch(split):
+    data = train_data if split == "train" else val_data
+    ix = jax.random.randint(random_key, (), 0, data.shape[0])
+    x = jnp.stack([data[i : i + block_size].astype(jnp.int64) for i in ix], axis=-1)
+    y = jnp.stack(
+        [data[i + 1 : i + 1 + block_size].astype(jnp.int64) for i in ix], axis=-1
+    )
+    return x, y
