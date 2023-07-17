@@ -19,6 +19,7 @@ eval_iters: int = 200
 eval_only: bool = False  # if True, script exits right after the first eval
 always_save_checkpoint: bool = True  # if True, always save a checkpoint after each eval
 init_from: Literal["scratch", "resume", "gpt2"] = "scratch"
+assert init_from in ["scratch", "resume", "gpt2"]
 
 # data
 dataset: str = "openwebtext"
@@ -136,7 +137,7 @@ elif init_from == "resume":
     iter_num = checkpoint["iter_num"]
     best_val_loss = checkpoint["best_val_loss"]
 
-elif init_from.startswith("gpt2"):
+else:
     print(f"Initializing from OpenAI GPT-2 weights: {init_from}")
     # initialize from OpenAI GPT-2 weights
     override_args = dict(dropout=dropout)
