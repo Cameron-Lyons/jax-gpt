@@ -39,3 +39,9 @@ weight_decay: float = 1e-1
 beta1: float = 0.9
 beta2: float = 0.95
 grad_clip: float = 1.0  # clip gradients at this value, or disable if == 0.0
+
+# learning rate decay settings
+decay_lr: bool = True  # whether to decay the learning rate
+warmup_iters: int = 2000  # how many steps to warm up for
+lr_decay_iters: int = 600000
+min_lr: float = 6e-5
