@@ -48,3 +48,11 @@ min_lr: float = 6e-5
 # system
 device: Literal["cpu", "gpu", "tpu"] = jax.default_backend()
 dtype: Literal["bfloat16", "float16", "float"] = "bfloat16"
+
+config_keys = [
+    k
+    for k, v in globals().items()
+    if not k.startswith("_") and isinstance(v, (int, float, bool, str))
+]
+exec(open("configurator.py").read())  # overrides from command line or config file
+config = {k: globals()[k] for k in config_keys}  # will be useful for logging
