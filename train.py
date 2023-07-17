@@ -56,3 +56,13 @@ config_keys = [
 ]
 exec(open("configurator.py").read())  # overrides from command line or config file
 config = {k: globals()[k] for k in config_keys}  # will be useful for logging
+
+random_key = jax.random.PRNGKey(0)
+
+data_dir = os.path.join("data", dataset)
+train_data: jax.Array = jnp.load(
+    os.path.join(data_dir, "train.bin"), dtype=jnp.uint16, mode="r"
+)
+val_data: jax.Array = jnp.load(
+    os.path.join(data_dir, "val.bin"), dtype=jnp.uint16, mode="r"
+)
