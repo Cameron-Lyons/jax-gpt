@@ -76,3 +76,15 @@ def get_batch(split):
         [data[i + 1 : i + 1 + block_size].astype(jnp.int64) for i in ix], axis=-1
     )
     return x, y
+
+
+iter_num: int = 0
+best_val_loss: float = 1e9
+
+meta_path: str = os.path.join(data_dir, "meta.pkl")
+meta_vocab_size: int = 0
+if os.path.exists(meta_path):
+    with open(meta_path, "rb") as f:
+        meta = pickle.load(f)
+    meta_vocab_size = meta["vocab_size"]
+    print(f"found vocab_size = {meta_vocab_size} (inside {meta_path})")
