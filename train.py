@@ -24,3 +24,10 @@ dataset: str = "openwebtext"
 gradient_accumulation_steps: int = 5 * 8  # used to simulate larger batch sizes
 batch_size: int = 12  # if gradient_accumulation_steps > 1, this is the micro-batch size
 block_size: int = 1024
+
+# model
+n_layer: int = 12
+n_head: int = 12
+n_embd: int = 768
+dropout: float = 0.0  # for pretraining 0 is good, for finetuning try 0.1+
+bias: bool = False  # do we use bias inside LayerNorm and Linear layers?
