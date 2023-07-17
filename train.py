@@ -45,3 +45,6 @@ decay_lr: bool = True  # whether to decay the learning rate
 warmup_iters: int = 2000  # how many steps to warm up for
 lr_decay_iters: int = 600000
 min_lr: float = 6e-5
+# system
+device: Literal["cpu", "gpu", "tpu"] = jax.default_backend()
+dtype: Literal["bfloat16", "float16", "float"] = "bfloat16"
