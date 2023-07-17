@@ -31,3 +31,11 @@ n_head: int = 12
 n_embd: int = 768
 dropout: float = 0.0  # for pretraining 0 is good, for finetuning try 0.1+
 bias: bool = False  # do we use bias inside LayerNorm and Linear layers?
+
+# adamw optimizer
+learning_rate: float = 6e-4  # max learning rate
+max_iters: int = 600000  # total number of training iterations
+weight_decay: float = 1e-1
+beta1: float = 0.9
+beta2: float = 0.95
+grad_clip: float = 1.0  # clip gradients at this value, or disable if == 0.0
