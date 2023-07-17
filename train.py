@@ -18,3 +18,9 @@ eval_iters: int = 200
 eval_only: bool = False  # if True, script exits right after the first eval
 always_save_checkpoint: bool = True  # if True, always save a checkpoint after each eval
 init_from: Literal["scratch", "resume", "gpt2"] = "scratch"
+
+# data
+dataset: str = "openwebtext"
+gradient_accumulation_steps: int = 5 * 8  # used to simulate larger batch sizes
+batch_size: int = 12  # if gradient_accumulation_steps > 1, this is the micro-batch size
+block_size: int = 1024
