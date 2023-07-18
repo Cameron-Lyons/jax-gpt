@@ -4,12 +4,10 @@ import os
 import time
 import math
 import pickle
-from contextlib import nullcontext
-
 import jax.numpy as jnp
 import jax
 import optax
-from typing import Literal
+from typing import Literal, Dict
 from gpt2 import GPTConfig, gpt2
 
 # I/O
@@ -170,7 +168,7 @@ if compile:
     model = jax.jit(model)
 
 
-def estimate_loss():
+def estimate_loss() -> Dict[str, float]:
     out = {}
     for split in ["train", "val"]:
         losses = jnp.zeros(eval_iters)
@@ -180,3 +178,17 @@ def estimate_loss():
             losses[k] = loss.item()
         out[split] = losses.mean()
     return out
+
+
+def get_lr(it: int) -> float:
+    # 1) linear warmup for warmup_iters steps
+    if it < warmup_iters:
+        return learning_rate * it / warmup_iters
+    # 2) if it > lr_decay_iters, return min learning rate
+    if it > lr_decay_iters:
+        return min_lr
+    # 3) in between, use cosine decay down to min learning rate
+    decay_ratio = (it - warmup_iters) / (lr_decay_iters - warmup_iters)
+    assert 0 <= decay_ratio <= 1
+    coeff = 0.5 * (1.0 + math.cos(math.pi * decay_ratio))  # coeff ranges 0..1
+    return min_lr + coeff * (learning_rate - min_lr)
