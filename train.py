@@ -161,3 +161,10 @@ optimizer = optax.adamw(
     b2=beta2,
     eps=1e-8,
 )
+
+checkpoint = None
+
+if compile:
+    print("compiling the model... (takes a ~minute)")
+    unoptimized_model = model
+    model = jax.jit(model)
