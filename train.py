@@ -168,3 +168,15 @@ if compile:
     print("compiling the model... (takes a ~minute)")
     unoptimized_model = model
     model = jax.jit(model)
+
+
+def estimate_loss():
+    out = {}
+    for split in ["train", "val"]:
+        losses = jnp.zeros(eval_iters)
+        for k in range(eval_iters):
+            X, Y = get_batch(split)
+            _, loss = model(X, Y)
+            losses[k] = loss.item()
+        out[split] = losses.mean()
+    return out
