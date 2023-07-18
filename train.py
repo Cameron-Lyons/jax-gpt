@@ -196,3 +196,13 @@ t0 = time.time()
 local_iter_num: int = 0
 raw_model = model
 running_mfu: float = -1.0
+
+while True:
+    lr = get_lr(iter_num) if decay_lr else learning_rate
+    if iter_num % eval_interval == 0:
+        losses = estimate_loss()
+        print(
+            f"step {iter_num}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}"
+        )
+        if losses["val"] < best_val_loss or always_save_checkpoint:
+            best_val_loss = losses["val"]
