@@ -206,3 +206,7 @@ while True:
         )
         if losses["val"] < best_val_loss or always_save_checkpoint:
             best_val_loss = losses["val"]
+    for micro_step in range(gradient_accumulation_steps):
+        logits, loss = model(X, Y)
+        loss = loss / gradient_accumulation_steps
+        X, Y = get_batch("train")
