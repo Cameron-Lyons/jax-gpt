@@ -8,6 +8,7 @@ from contextlib import nullcontext
 
 import jax.numpy as jnp
 import jax
+import optax
 from typing import Literal
 from gpt2 import GPTConfig, gpt2
 
@@ -152,3 +153,11 @@ if block_size < model.config.block_size:
         "block_size"
     ] = block_size  # so that the checkpoint will have the right value
 model.to(device)
+
+optimizer = optax.adamw(
+    learning_rate=learning_rate,
+    weight_decay=weight_decay,
+    b1=beta1,
+    b2=beta2,
+    eps=1e-8,
+)
