@@ -196,6 +196,7 @@ t0 = time.time()
 local_iter_num: int = 0
 raw_model = model
 running_mfu: float = -1.0
+state = optimizer.init(model)
 
 while True:
     lr = get_lr(iter_num) if decay_lr else learning_rate
@@ -210,4 +211,5 @@ while True:
         logits, loss = model(X, Y)
         loss = loss / gradient_accumulation_steps
         X, Y = get_batch("train")
-z
+        gradient_fn = jax.value_and_grad(estimate_loss)
+        _, grads = gradient_fn()
