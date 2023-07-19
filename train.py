@@ -213,3 +213,29 @@ while True:
         X, Y = get_batch("train")
         gradient_fn = jax.value_and_grad(estimate_loss)
         _, grads = gradient_fn()
+        state = optimizer.update(grads, state)
+        model = optax.apply_updates(model, state.params)
+        iter_num += 1
+        local_iter_num += 1
+        if iter_num % log_interval == 0:
+            print(
+                f"step {iter_num}: train loss {loss.item():.4f}, lr {lr:.4g}, time {time.time() - t0:.4f}"
+            )
+            t0 = time.time()
+        if iter_num % eval_interval == 0:
+            losses = estimate_loss()
+            print(
+                f"step {iter_num}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}"
+            )
+            if losses["val"] < best_val_loss or always_save_checkpoint:
+                best_val_loss = losses["val"]
+                checkpoint = {
+                    "model_args": model_args,
+                    "iter_num": iter_num,
+                    "best_val_loss": best_val_loss,
+                }
+                ckpt_path = os.path.join(out_dir, "ckpt.pt")
+            if eval_only:
+                exit()
+        if iter_num >= max_iters:
+            exit()
