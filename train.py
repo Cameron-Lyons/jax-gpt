@@ -7,7 +7,7 @@ import pickle
 import jax.numpy as jnp
 import jax
 import optax
-from typing import Literal, Dict, L
+from typing import Literal, Dict, List
 from gpt2 import GPTConfig, gpt2, lm_loss
 
 # I/O
