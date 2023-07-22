@@ -7,7 +7,7 @@ import pickle
 import jax.numpy as jnp
 import jax
 import optax
-from typing import Literal, Dict, List
+from typing import Literal, Dict, L
 from gpt2 import GPTConfig, gpt2, lm_loss
 
 # I/O
@@ -210,10 +210,8 @@ class WhitespaceTokenizer:
         return " ".join([self.vocab[word] for word in tokens])
 
 
-tokenizer = WhitespaceTokenizer(vocab)
-
-
 def train(texts: list[list[str]], params) -> float:
+    tokenizer = WhitespaceTokenizer(params["vocab"])
     for text in texts:
         inputs = tokenizer.encode(text)
         loss = lm_loss(inputs, params)
