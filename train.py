@@ -7,7 +7,7 @@ import pickle
 import jax.numpy as jnp
 import jax
 import optax
-from typing import Literal, Dict
+from typing import Literal, Dict, List
 from gpt2 import GPTConfig, gpt2, lm_loss
 
 # I/O
@@ -197,6 +197,20 @@ local_iter_num: int = 0
 raw_model = model
 running_mfu: float = -1.0
 state = optimizer.init(model)
+
+
+class WhitespaceTokenizer:
+    def __init__(self, vocab: Dict[str, int]):
+        self.vocab = vocab
+
+    def encode(self, text: str) -> List[int]:
+        return [self.vocab[word] for word in text.split(" ")]
+
+    def decode(self, tokens: List[int]) -> str:
+        return " ".join([self.vocab[word] for word in tokens])
+
+
+tokenizer = WhitespaceTokenizer(vocab)
 
 
 def train(texts: list[list[str]], params) -> float:
