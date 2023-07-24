@@ -5,6 +5,7 @@ import os
 from contextlib import nullcontext
 import jax.numpy as jnp
 import jax
+import optax
 import time
 from gpt2 import GPTConfig, gpt2
 from typing import Literal
@@ -71,3 +72,6 @@ gptconf = GPTConfig(
     bias=bias,
 )
 model = gpt2(gptconf)
+
+optimizer = optax.adamw(learning_rate=1e-4)
+opt_state = optimizer.init(model)
