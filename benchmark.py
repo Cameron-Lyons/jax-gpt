@@ -60,3 +60,14 @@ else:
         maxval=50304,
     )
     get_batch = lambda split: (x, y)
+
+# model init
+gptconf = GPTConfig(
+    block_size=block_size,  # how far back does the model look? i.e. context size
+    n_layer=12,
+    n_head=12,
+    n_embd=768,  # size of the model
+    dropout=0,  # for determinism
+    bias=bias,
+)
+model = gpt2(gptconf)
