@@ -4,17 +4,17 @@ A much shorter version of train.py for benchmarking
 import os
 from contextlib import nullcontext
 import jax.numpy as jnp
+import jax
 import time
-import torch
 from gpt2 import GPTConfig, gpt2
 from typing import Literal
-
 
 batch_size: int = 12
 block_size: int = 1024
 bias: bool = False
 real_data: bool = True
 seed: int = 0
+key = jax.random.PRNGKey(seed)
 device: Literal["cpu", "gpu", "tpu"] = "gpu"
 dtype: Literal["bfloat16", "float16", "float"] = "bfloat16"
 compile: bool = True
@@ -47,6 +47,16 @@ if real_data:
 
 else:
     # alternatively, if fixed data is desired to not care about data loading
-    x = torch.randint(50304, (batch_size, block_size), device=device)
-    y = torch.randint(50304, (batch_size, block_size), device=device)
+    x = jax.random.randint(
+        key=key,
+        shape=(batch_size, block_size),
+        minval=0,
+        maxval=50304,
+    )
+    y = jax.random.randint(
+        key=key,
+        shape=(batch_size, block_size),
+        minval=0,
+        maxval=50304,
+    )
     get_batch = lambda split: (x, y)
