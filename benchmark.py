@@ -31,7 +31,7 @@ if real_data:
 
     def get_batch(split):
         data = train_data  # note ignore split in benchmarking script
-        ix = torch.randint(len(data) - block_size, (batch_size,))
+        ix = jax.random.randint(key, (batch_size,), 0, len(data) - block_size)
         x = torch.stack(
             [torch.from_numpy((data[i : i + block_size]).astype(jnp.int64)) for i in ix]
         )
