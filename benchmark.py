@@ -68,3 +68,21 @@ model = gpt2(gptconf)
 
 optimizer = optax.adamw(learning_rate=1e-4)
 opt_state = optimizer.init(model)
+
+
+for stage, num_steps in enumerate([10, 20]):  # burnin, then benchmark
+    t0 = time.time()
+    X, Y = get_batch("train")
+    for k in range(num_steps):
+        logits, loss = model(X, Y)
+        X, Y = get_batch("train")
+        optimizer.zero_grad(set_to_none=True)
+        loss.backward()
+        optimizer.step()
+        lossf = loss.item()
+        print(f"{k}/{num_steps} loss: {lossf:.4f}")
+    t1 = time.time()
+    dt = t1 - t0
+    mfu = model.estimate_mfu(batch_size * 1 * num_steps, dt)
+    if stage == 1:
+        print(f"time per iteration: {dt/num_steps*1000:.4f}ms, MFU: {mfu*100:.2f}%")
