@@ -11,6 +11,7 @@ from typing import Literal, Dict, List
 from gpt2 import GPTConfig, gpt2, lm_loss
 import nltk
 import re
+import spacy
 
 # I/O
 out_dir: str = "out"
@@ -223,6 +224,15 @@ class NLTKTokenizer:
 class RegexTokenizer:
     def tokenize(self, text):
         return re.findall(r"\b\w+\b", text)
+
+
+class SpaCyTokenizer:
+    def __init__(self):
+        self.nlp = spacy.load("en_core_web_sm")
+
+    def tokenize(self, text):
+        doc = self.nlp(text)
+        return [token.text for token in doc]
 
 
 def train(texts: list[list[str]], params) -> float:
