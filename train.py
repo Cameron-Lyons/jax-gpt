@@ -9,6 +9,7 @@ import jax
 import optax
 from typing import Literal, Dict, List
 from gpt2 import GPTConfig, gpt2, lm_loss
+import nltk
 
 # I/O
 out_dir: str = "out"
@@ -208,6 +209,14 @@ class WhitespaceTokenizer:
 
     def decode(self, tokens: List[int]) -> str:
         return " ".join([self.vocab[word] for word in tokens])
+
+
+class NLTKTokenizer:
+    def __init__(self):
+        self.tokenizer = nltk.tokenize.TreebankWordTokenizer()
+
+    def tokenize(self, text):
+        return self.tokenizer.tokenize(text)
 
 
 def train(texts: list[list[str]], params) -> float:
