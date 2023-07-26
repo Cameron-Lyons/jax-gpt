@@ -10,6 +10,7 @@ import optax
 from typing import Literal, Dict, List
 from gpt2 import GPTConfig, gpt2, lm_loss
 import nltk
+import re
 
 # I/O
 out_dir: str = "out"
@@ -217,6 +218,11 @@ class NLTKTokenizer:
 
     def tokenize(self, text):
         return self.tokenizer.tokenize(text)
+
+
+class RegexTokenizer:
+    def tokenize(self, text):
+        return re.findall(r"\b\w+\b", text)
 
 
 def train(texts: list[list[str]], params) -> float:
