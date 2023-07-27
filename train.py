@@ -235,6 +235,13 @@ class SpaCyTokenizer:
         return [token.text for token in doc]
 
 
+def compute_gradients_via_backpropagation(loss, params):
+    grad_fn = jax.grad(loss)
+
+    gradients = grad_fn(params)
+    return gradients
+
+
 def train(texts: list[list[str]], params) -> float:
     tokenizer = WhitespaceTokenizer(params["vocab"])
     for text in texts:
