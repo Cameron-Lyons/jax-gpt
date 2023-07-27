@@ -239,7 +239,7 @@ def train(texts: list[list[str]], params) -> float:
     tokenizer = WhitespaceTokenizer(params["vocab"])
     for text in texts:
         inputs = tokenizer.encode(text)
-        loss = lm_loss(inputs, params)
+        loss = lm_loss(params, inputs, n_head)
         gradients = compute_gradients_via_backpropagation(loss, params)
         params = gradient_descent_update_step(gradients, params)
     return params
