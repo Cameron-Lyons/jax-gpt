@@ -12,6 +12,7 @@ from gpt2 import GPTConfig, gpt2, lm_loss
 import nltk
 import re
 import spacy
+import torch
 
 # I/O
 out_dir: str = "out"
