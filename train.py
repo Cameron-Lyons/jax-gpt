@@ -242,11 +242,23 @@ def compute_gradients_via_backpropagation(loss, params):
     return gradients
 
 
-def train(texts: list[list[str]], params) -> float:
+def gradient_descent_update_step(gradients, params, optimizer, optimizer_state):
+    updates, new_optimizer_state = optimizer.update(gradients, optimizer_state)
+    new_params = optax.apply_updates(params, updates)
+    return new_params, new_optimizer_state
+
+
+def train(texts: list[str], params):
+    # Initialize an optimizer and its state
+    optimizer = optax.sgd(learning_rate=0.01)
+    optimizer_state = optimizer.init(params)
+
     tokenizer = WhitespaceTokenizer(params["vocab"])
     for text in texts:
         inputs = tokenizer.encode(text)
         loss = lm_loss(params, inputs, n_head)
         gradients = compute_gradients_via_backpropagation(loss, params)
-        params = gradient_descent_update_step(gradients, params)
+        params, optimizer_state = gradient_descent_update_step(
+            gradients, params, optimizer, optimizer_state
+        )
     return params
