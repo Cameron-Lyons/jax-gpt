@@ -172,13 +172,13 @@ if compile:
     model = jax.jit(model)
 
 
-def estimate_loss() -> Dict[str, float]:
+def estimate_loss() -> Dict[str, jax.Array]:
     out = {}
     for split in ["train", "val"]:
         losses = jnp.zeros(eval_iters)
         for k in range(eval_iters):
-            X, Y = get_batch(split)
-            _, loss = model(X, Y)
+            X_batch, Y_batch = get_batch(split)
+            _, loss = model(X_batch, Y_batch)
             losses[k] = loss.item()
         out[split] = losses.mean()
     return out
@@ -249,7 +249,7 @@ def gradient_descent_update_step(gradients, params, optimizer, optimizer_state):
     return new_params, new_optimizer_state
 
 
-def train(texts: list[str], params):
+def train(texts: list[str], params: Dict[str, jax.Array]) -> Dict[str, jax.Array]:
     # Initialize an optimizer and its state
     optimizer = optax.sgd(learning_rate=0.01)
     optimizer_state = optimizer.init(params)
