@@ -61,7 +61,7 @@ def load_gpt2_params_from_tf_ckpt(
     params = {"blocks": [{} for _ in range(hparams["n_layer"])]}
     for name, _ in tf.train.list_variables(tf_ckpt_path):
         array = jnp.squeeze(tf.train.load_variable(tf_ckpt_path, name))
-        name = name[len("model/") :]
+        name = name[len("model/"):]
         if name.startswith("h"):
             m = re.match(r"h([0-9]+)/(.*)", name)
             n = int(m[1])

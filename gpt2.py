@@ -123,7 +123,7 @@ def generate(
         logits = gpt2(inputs, **params, n_head=n_head)
         next_id = jnp.argmax(logits[-1])
         inputs.append(int(next_id))
-    return inputs[len(inputs) - n_tokens_to_generate :]
+    return inputs[len(inputs) - n_tokens_to_generate:]
 
 
 def main(
