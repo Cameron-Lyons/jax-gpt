@@ -2,7 +2,6 @@
 A much shorter version of train.py for benchmarking
 """
 import os
-from contextlib import nullcontext
 import jax.numpy as jnp
 import jax
 import optax
@@ -29,12 +28,12 @@ if real_data:
         os.path.join(data_dir, "train.bin"), dtype=jnp.uint16, mode="r"
     )
 
-    def get_batch(split):
+    def get_batch():
         data = train_data  # note ignore split in benchmarking script
         ix = jax.random.randint(key, (batch_size,), 0, len(data) - block_size)
-        x = jnp.stack([(data[i : i + block_size]).astype(jnp.int64) for i in ix])
+        x = jnp.stack([(data[i:i+block_size]).astype(jnp.int64) for i in ix])
         y = jnp.stack(
-            [(data[i + 1 : i + 1 + block_size]).astype(jnp.int64) for i in ix]
+            [(data[i+1: i+1+block_size]).astype(jnp.int64) for i in ix]
         )
 
         return x, y
