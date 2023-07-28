@@ -76,9 +76,9 @@ val_data: jax.Array = jnp.load(
 def get_batch(split):
     data = train_data if split == "train" else val_data
     ix = jax.random.randint(random_key, (), 0, data.shape[0])
-    x = jnp.stack([data[i : i + block_size].astype(jnp.int64) for i in ix], axis=-1)
+    x = jnp.stack([data[i:i + block_size].astype(jnp.int64) for i in ix], axis=-1)
     y = jnp.stack(
-        [data[i + 1 : i + 1 + block_size].astype(jnp.int64) for i in ix], axis=-1
+        [data[i+1: i+1 + block_size].astype(jnp.int64) for i in ix], axis=-1
     )
     return x, y
 
@@ -135,7 +135,7 @@ elif init_from == "resume":
     unwanted_prefix = "_orig_mod."
     for k, v in list(state_dict.items()):
         if k.startswith(unwanted_prefix):
-            state_dict[k[len(unwanted_prefix) :]] = state_dict.pop(k)
+            state_dict[k[len(unwanted_prefix):]] = state_dict.pop(k)
     model.load_state_dict(state_dict)
     iter_num = checkpoint["iter_num"]
     best_val_loss = checkpoint["best_val_loss"]
@@ -177,8 +177,8 @@ def estimate_loss() -> Dict[str, jax.Array]:
     for split in ["train", "val"]:
         losses = jnp.zeros(eval_iters)
         for k in range(eval_iters):
-            X_batch, Y_batch = get_batch(split)
-            _, loss = model(X_batch, Y_batch)
+            x_batch, y_batch = get_batch(split)
+            _, loss = model(x_batch, y_batch)
             losses[k] = loss.item()
         out[split] = losses.mean()
     return out
@@ -243,15 +243,15 @@ def compute_gradients_via_backpropagation(loss, params):
     return gradients
 
 
-def gradient_descent_update_step(gradients, params, optimizer, optimizer_state):
-    updates, new_optimizer_state = optimizer.update(gradients, optimizer_state)
+def gradient_descent_update_step(gradients, params, opt, optimizer_state):
+    updates, new_optimizer_state = opt.update(gradients, optimizer_state)
     new_params = optax.apply_updates(params, updates)
     return new_params, new_optimizer_state
 
 
 def train(texts: list[str], params: Dict[str, jax.Array]) -> Dict[str, jax.Array]:
     # Initialize an optimizer and its state
-    optimizer = optax.sgd(learning_rate=0.01)
+    opt = optax.sgd(learning_rate=0.01)
     optimizer_state = optimizer.init(params)
 
     tokenizer = WhitespaceTokenizer(params["vocab"])
@@ -260,6 +260,6 @@ def train(texts: list[str], params: Dict[str, jax.Array]) -> Dict[str, jax.Array
         loss = lm_loss(params, inputs, n_head)
         gradients = compute_gradients_via_backpropagation(loss, params)
         params, optimizer_state = gradient_descent_update_step(
-            gradients, params, optimizer, optimizer_state
+            gradients, params, opt, optimizer_state
         )
     return params
