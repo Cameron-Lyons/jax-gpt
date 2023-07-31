@@ -68,6 +68,8 @@ model = gpt2(gptconf)
 optimizer = optax.adamw(learning_rate=1e-4)
 opt_state = optimizer.init(model)
 
+if compile:
+    model = jax.jit(model)
 
 for stage, num_steps in enumerate([10, 20]):  # burnin, then benchmark
     t0 = time.time()
