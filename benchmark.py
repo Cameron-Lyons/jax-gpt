@@ -72,10 +72,10 @@ if compile:
 
 for stage, num_steps in enumerate([10, 20]):  # burnin, then benchmark
     t0 = time.time()
-    X, Y = get_batch("train")
+    X, Y = get_batch()
     for k in range(num_steps):
         logits, loss = model(X, Y)
-        X, Y = get_batch("train")
+        X, Y = get_batch()
         optimizer.zero_grad(set_to_none=True)
         loss.backward()
         optimizer.step()
