@@ -7,7 +7,7 @@ import pickle
 import jax.numpy as jnp
 import jax
 import optax
-from typing import Literal, Dict, List
+from typing import Literal, Dict, List, Tuple
 from gpt2 import GPTConfig, gpt2, lm_loss
 import nltk
 import re
@@ -73,13 +73,13 @@ val_data: jax.Array = jnp.load(
 )
 
 
-def get_batch(split):
+def get_batch(split: Literal["train", "val"]) -> Tuple[jax.Array, jax.Array]:
     """get batches for training"""
     data = train_data if split == "train" else val_data
     ix = jax.random.randint(random_key, (), 0, data.shape[0])
-    x = jnp.stack([data[i:i + block_size].astype(jnp.int64) for i in ix], axis=-1)
+    x = jnp.stack([data[i : i + block_size].astype(jnp.int64) for i in ix], axis=-1)
     y = jnp.stack(
-        [data[i+1: i+1 + block_size].astype(jnp.int64) for i in ix], axis=-1
+        [data[i + 1 : i + 1 + block_size].astype(jnp.int64) for i in ix], axis=-1
     )
     return x, y
 
@@ -136,7 +136,7 @@ elif init_from == "resume":
     unwanted_prefix = "_orig_mod."
     for k, v in list(state_dict.items()):
         if k.startswith(unwanted_prefix):
-            state_dict[k[len(unwanted_prefix):]] = state_dict.pop(k)
+            state_dict[k[len(unwanted_prefix) :]] = state_dict.pop(k)
     model.load_state_dict(state_dict)
     iter_num = checkpoint["iter_num"]
     best_val_loss = checkpoint["best_val_loss"]
