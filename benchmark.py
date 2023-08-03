@@ -21,19 +21,18 @@ compile: bool = True
 profile: bool = False
 exec(open("configurator.py").read())  # overrides from command line or config file
 
+
 if real_data:
     dataset = "openwebtext"
     data_dir = os.path.join("data", dataset)
-    train_data = jnp.memmap(
-        os.path.join(data_dir, "train.bin"), dtype=jnp.uint16, mode="r"
-    )
+    train_data = jnp.fromfile(data_dir, dtype=jnp.uint16)
 
     def get_batch():
         data = train_data  # note ignore split in benchmarking script
         ix = jax.random.randint(key, (batch_size,), 0, len(data) - block_size)
-        x = jnp.stack([(data[i:i+block_size]).astype(jnp.int64) for i in ix])
+        x = jnp.stack([(data[i : i + block_size]).astype(jnp.int64) for i in ix])
         y = jnp.stack(
-            [(data[i+1: i+1+block_size]).astype(jnp.int64) for i in ix]
+            [(data[i + 1 : i + 1 + block_size]).astype(jnp.int64) for i in ix]
         )
 
         return x, y
