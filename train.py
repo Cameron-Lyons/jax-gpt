@@ -174,6 +174,7 @@ if compile:
 
 
 def estimate_loss() -> Dict[str, jax.Array]:
+    """estimate loss on train and validation sets"""
     out = {}
     for split in ["train", "val"]:
         losses = jnp.zeros(eval_iters)
