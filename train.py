@@ -174,7 +174,7 @@ if compile:
 
 
 def estimate_loss() -> Dict[str, jax.Array]:
-    """estimate loss on train and validation sets"""
+    """estimate loss on train and validation sets"""[]
     out = {}
     for split in ["train", "val"]:
         losses = jnp.zeros(eval_iters)
@@ -187,6 +187,7 @@ def estimate_loss() -> Dict[str, jax.Array]:
 
 
 def get_lr(it: int) -> float:
+    """learning rate annealing"""
     if it < warmup_iters:
         return learning_rate * it / warmup_iters
     if it > lr_decay_iters:
