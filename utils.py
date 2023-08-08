@@ -2,12 +2,12 @@
 import json
 import os
 import re
-from typing import Literal, Dict, Any
+from typing import Literal, Dict, Any, Tuple
 import jax.numpy as jnp
 import requests
 import tensorflow as tf
 from tqdm import tqdm
-from encoder import get_encoder
+from encoder import get_encoder, Encoder
 
 
 def download_gpt2_files(
@@ -61,7 +61,7 @@ def load_gpt2_params_from_tf_ckpt(
     params = {"blocks": [{} for _ in range(hparams["n_layer"])]}
     for name, _ in tf.train.list_variables(tf_ckpt_path):
         array = jnp.squeeze(tf.train.load_variable(tf_ckpt_path, name))
-        name = name[len("model/"):]
+        name = name[len("model/") :]
         if name.startswith("h"):
             m = re.match(r"h([0-9]+)/(.*)", name)
             n = int(m[1])
@@ -75,7 +75,7 @@ def load_gpt2_params_from_tf_ckpt(
 
 def load_encoder_hparams_and_params(
     model_size: Literal["124M", "355M", "774M", "1558M"], models_dir: str
-):
+) -> Tuple[Encoder, Dict[str, Any], Dict[str, Any]]:
     """Load the encoder, hparams, and params for a given model size"""
     assert model_size in ["124M", "355M", "774M", "1558M"]
 
