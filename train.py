@@ -207,7 +207,7 @@ state = optimizer.init(model)
 
 
 class WhitespaceTokenizer:
-    def __init__(self, vocab: Dict[str, int]):
+    """use each word as own token"""def __init__(self, vocab: Dict[str, int]):
         self.vocab = vocab
 
     def encode(self, text: str) -> List[int]:
