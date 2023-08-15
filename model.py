@@ -1,3 +1,4 @@
+import jax
 import jax.numpy as jnp
 from jax.scipy.special import logsumexp
 from flax import linen as nn
@@ -136,3 +137,22 @@ class GPT(nn.Module):
             kernel_init=nn.initializers.xavier_uniform(),
             use_bias=False,
         )
+
+    def _init_weights(self, rng, shape, module_name, is_bias=False):
+        if module_name in ["Dense", "Embed"]:
+            # For weight initialization
+            if not is_bias:
+                std = 0.02
+                return jax.random.normal(rng, shape) * std
+            # For bias initialization
+            else:
+                return jnp.zeros(shape)
+        elif module_name == "LayerNorm":
+            # For weight initialization
+            if not is_bias:
+                return jnp.ones(shape)
+            # For bias initialization
+            else:
+                return jnp.zeros(shape)
+        else:
+            raise ValueError(f"Unknown module name: {module_name}")
