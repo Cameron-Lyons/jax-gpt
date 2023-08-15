@@ -1,8 +1,8 @@
-import jax
 import jax.numpy as jnp
+from jax import random
 from jax.scipy.special import logsumexp
+import flax
 from flax import linen as nn
-from flax.core import freeze, unfreeze
 from flax.struct import dataclass
 import optax
 from transformers import FlaxGPT2LMHeadModel
@@ -146,7 +146,7 @@ class GPT(nn.Module):
             # For weight initialization
             if not is_bias:
                 std = 0.02
-                return jax.random.normal(rng, shape) * std
+                return random.normal(rng, shape) * std
             # For bias initialization
             else:
                 return jnp.zeros(shape)
@@ -166,11 +166,11 @@ class GPT(nn.Module):
         Initialize a pretrained GPT model by copying over the weights
         from a huggingface/transformers checkpoint.
         """
-        assert model_type in {'gpt2', 'gpt2-medium', 'gpt2-large', 'gpt2-xl'}
+        assert model_type in {"gpt2", "gpt2-medium", "gpt2-large", "gpt2-xl"}
 
         config = cls.get_default_config()
         config.model_type = model_type
-        config.vocab_size = 50257 # openai's model vocabulary
+        config.vocab_size = 50257  # openai's model vocabulary
         config.block_size = 1024  # openai's model block_size
         model = GPT(config)
 
@@ -185,48 +185,63 @@ class GPT(nn.Module):
         decay_params = []
         no_decay_params = []
 
-        whitelist_weight_modules = (flax.linen.Dense,)
-        blacklist_weight_modules = (flax.linen.LayerNorm, flax.linen.Embed,)
+        whitelist_weight_modules = (nn.Dense,)
+        blacklist_weight_modules = (
+            nn.LayerNorm,
+            nn.Embed,
+        )
 
         params = flax.traverse_util.flatten_dict(self.params)
-        
-        for (module_name, param_name), param_value in params.items():
+
+        for (module_name, param_name), _ in params.items():
             fpn = f"{module_name}.{param_name}"
 
-            if param_name.endswith('bias'):
+            if param_name.endswith("bias"):
                 no_decay_params.append(fpn)
-            elif param_name.endswith('weight') and isinstance(getattr(self, module_name), whitelist_weight_modules):
+            elif param_name.endswith("weight") and isinstance(
+                getattr(self, module_name), whitelist_weight_modules
+            ):
                 decay_params.append(fpn)
-            elif param_name.endswith('weight') and isinstance(getattr(self, module_name), blacklist_weight_modules):
+            elif param_name.endswith("weight") and isinstance(
+                getattr(self, module_name), blacklist_weight_modules
+            ):
                 no_decay_params.append(fpn)
 
         # Ensure no overlap and coverage of parameters
         inter_params = set(decay_params) & set(no_decay_params)
         union_params = set(decay_params) | set(no_decay_params)
-        assert len(inter_params) == 0, f"Parameters {inter_params} made it into both decay/no_decay sets!"
-        assert len(set(params.keys()) - union_params) == 0, f"Parameters {set(params.keys()) - union_params} were not separated into either decay/no_decay set!"
+        assert (
+            len(inter_params) == 0
+        ), f"Parameters {inter_params} made it into both decay/no_decay sets!"
+        assert (
+            len(set(params.keys()) - union_params) == 0
+        ), f"Parameters {set(params.keys()) - union_params} were not separated into either decay/no_decay set!"
 
         weight_decay = optax.adamw(train_config.weight_decay)
         no_weight_decay = optax.adamw(0.0)
-        
+
         optimizer = optax.chain(
             optax.masked(weight_decay, mask=decay_params),
             optax.masked(no_weight_decay, mask=no_decay_params),
-            optax.scale_by_adam(betas=train_config.betas),
+            optax.scale_by_adam(b1=train_config.betas[0], b2=train_config.betas[1]),
             optax.scale(-train_config.learning_rate),
         )
-        
+
         return optimizer
 
     def forward(self, idx, targets=None):
         device = idx.device
         b, t = idx.shape
-        assert t <= self.block_size, f"Cannot forward sequence of length {t}, block size is only {self.block_size}"
+        assert (
+            t <= self.block_size
+        ), f"Cannot forward sequence of length {t}, block size is only {self.block_size}"
         pos = jnp.arange(0, t, dtype=jnp.int32).reshape(1, -1)  # shape (1, t)
 
         # forward the GPT model itself
         tok_emb = self.transformer.wte(idx)  # token embeddings of shape (b, t, n_embd)
-        pos_emb = self.transformer.wpe(pos)  # position embeddings of shape (1, t, n_embd)
+        pos_emb = self.transformer.wpe(
+            pos
+        )  # position embeddings of shape (1, t, n_embd)
         x = self.transformer.drop(tok_emb + pos_emb)
         for block in self.transformer.h:
             x = block(x)
@@ -242,7 +257,15 @@ class GPT(nn.Module):
 
         return logits, loss
 
-    def generate(self, idx, max_new_tokens, temperature=1.0, do_sample=False, top_k=None, rng=None):
+    def generate(
+        self,
+        idx,
+        max_new_tokens,
+        temperature=1.0,
+        do_sample=False,
+        top_k=None,
+        rng=None,
+    ):
         """
         Take a conditioning sequence of indices idx (of shape (b,t)) and complete
         the sequence max_new_tokens times, feeding the predictions back into the model each time.
@@ -251,23 +274,23 @@ class GPT(nn.Module):
             rng = random.PRNGKey(0)
 
         for _ in range(max_new_tokens):
-            idx_cond = idx if idx.shape[1] <= self.block_size else idx[:, -self.block_size:]
-            
+            idx_cond = (
+                idx if idx.shape[1] <= self.block_size else idx[:, -self.block_size :]
+            )
+
             logits, _ = self(idx_cond)
-            
+
             logits = logits[:, -1, :] / temperature
-            
+
             if top_k is not None:
                 v = jnp.sort(logits, axis=-1)[:, -top_k:]
-                min_ to convert logits to (normalized) probabilities
             probs = nn.softmax(logits)
-            
+
             if do_sample:
                 idx_next = random.categorical(rng, logits, axis=-1)
             else:
                 idx_next = jnp.argmax(probs, axis=-1)
-            
+
             idx = jnp.concatenate((idx, idx_next[:, None]), axis=1)
 
         return idx
-
