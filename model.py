@@ -89,7 +89,7 @@ class Block(nn.Module):
 
 @dataclass
 class GPTConfig:
-    model_type: str = "gpt"
+    model_type: str = "gpt2"
     n_layer: int = None
     n_head: int = None
     n_embd: int = None
@@ -127,8 +127,8 @@ class GPT(nn.Module):
 
             config = GPTConfig(**model_configs[config.model_type])
 
-        self.wte = nn.Embed(vocab_size=config.vocab_size, features=config.n_embd)
-        self.wpe = nn.Embed(vocab_size=config.block_size, features=config.n_embd)
+        self.wte = nn.Embed(num_embeddings=config.vocab_size, features=config.n_embd)
+        self.wpe = nn.Embed(num_embeddings=config.block_size, features=config.n_embd)
         self.drop = nn.Dropout(rate=config.embd_pdrop)
         self.h = [Block(config) for _ in range(config.n_layer)]
         self.ln_f = nn.LayerNorm()
