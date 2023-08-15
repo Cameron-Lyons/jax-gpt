@@ -2,7 +2,10 @@ import jax
 import jax.numpy as jnp
 from jax.scipy.special import logsumexp
 from flax import linen as nn
+from flax.core import freeze, unfreeze
 from flax.struct import dataclass
+import optax
+from transformers import FlaxGPT2LMHeadModel
 import math
 
 
@@ -156,3 +159,61 @@ class GPT(nn.Module):
                 return jnp.zeros(shape)
         else:
             raise ValueError(f"Unknown module name: {module_name}")
+
+    @classmethod
+    def from_pretrained(cls, model_type):
+        """
+        Initialize a pretrained GPT model by copying over the weights
+        from a huggingface/transformers checkpoint.
+        """
+        assert model_type in {'gpt2', 'gpt2-medium', 'gpt2-large', 'gpt2-xl'}
+
+        config = cls.get_default_config()
+        config.model_type = model_type
+        config.vocab_size = 50257 # openai's model vocabulary
+        config.block_size = 1024  # openai's model block_size
+        model = GPT(config)
+
+        model_hf = FlaxGPT2LMHeadModel.from_pretrained(model_type)
+        return model
+
+    def configure_optimizers(self, train_config):
+    """
+    Set up the optimizer for the JAX/Flax model.
+    """
+
+    decay_params = []
+    no_decay_params = []
+
+    whitelist_weight_modules = (flax.linen.Dense,)
+    blacklist_weight_modules = (flax.linen.LayerNorm, flax.linen.Embed,)
+
+    params = flax.traverse_util.flatten_dict(self.params)
+    
+    for (module_name, param_name), param_value in params.items():
+        fpn = f"{module_name}.{param_name}"
+
+        if param_name.endswith('bias'):
+            no_decay_params.append(fpn)
+        elif param_name.endswith('weight') and isinstance(getattr(self, module_name), whitelist_weight_modules):
+            decay_params.append(fpn)
+        elif param_name.endswith('weight') and isinstance(getattr(self, module_name), blacklist_weight_modules):
+            no_decay_params.append(fpn)
+
+    # Ensure no overlap and coverage of parameters
+    inter_params = set(decay_params) & set(no_decay_params)
+    union_params = set(decay_params) | set(no_decay_params)
+    assert len(inter_params) == 0, f"Parameters {inter_params} made it into both decay/no_decay sets!"
+    assert len(set(params.keys()) - union_params) == 0, f"Parameters {set(params.keys()) - union_params} were not separated into either decay/no_decay set!"
+
+    weight_decay = optax.adamw(train_config.weight_decay)
+    no_weight_decay = optax.adamw(0.0)
+    
+    optimizer = optax.chain(
+        optax.masked(weight_decay, mask=decay_params),
+        optax.masked(no_weight_decay, mask=no_decay_params),
+        optax.scale_by_adam(betas=train_config.betas),
+        optax.scale(-train_config.learning_rate),
+    )
+    
+    return optimizer
