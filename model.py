@@ -50,3 +50,36 @@ class CausalSelfAttention(nn.Module):
 
         y = nn.Dropout(self.resid_pdrop)(self.c_proj(y))
         return y
+
+
+class Block(nn.Module):
+    n_embd: int
+    resid_pdrop: float
+
+    def setup(self):
+        self.ln_1 = nn.LayerNorm()
+        self.attn = CausalSelfAttention(
+            n_embd=self.n_embd,
+            n_head=self.n_head,
+            block_size=self.block_size,
+            attn_pdrop=self.attn_pdrop,
+            resid_pdrop=self.resid_pdrop,
+        )
+        self.ln_2 = nn.LayerNorm()
+
+        self.c_fc = nn.Dense(
+            4 * self.n_embd, kernel_init=nn.initializers.xavier_uniform()
+        )
+        self.c_proj = nn.Dense(
+            self.n_embd, kernel_init=nn.initializers.xavier_uniform()
+        )
+        self.act = NewGELU()
+        self.dropout = nn.Dropout(rate=self.resid_pdrop)
+
+    def mlpf(self, x):
+        return self.dropout(self.c_proj(self.act(self.c_fc(x))))
+
+    def __call__(self, x):
+        x = x + self.attn(self.ln_1(x))
+        x = x + self.mlpf(self.ln_2(x))
+        return x
