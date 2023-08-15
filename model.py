@@ -241,3 +241,33 @@ class GPT(nn.Module):
             loss = optax.softmax_cross_entropy(flat_logits, flat_targets).mean()
 
         return logits, loss
+
+    def generate(self, idx, max_new_tokens, temperature=1.0, do_sample=False, top_k=None, rng=None):
+        """
+        Take a conditioning sequence of indices idx (of shape (b,t)) and complete
+        the sequence max_new_tokens times, feeding the predictions back into the model each time.
+        """
+        if rng is None:
+            rng = random.PRNGKey(0)
+
+        for _ in range(max_new_tokens):
+            idx_cond = idx if idx.shape[1] <= self.block_size else idx[:, -self.block_size:]
+            
+            logits, _ = self(idx_cond)
+            
+            logits = logits[:, -1, :] / temperature
+            
+            if top_k is not None:
+                v = jnp.sort(logits, axis=-1)[:, -top_k:]
+                min_ to convert logits to (normalized) probabilities
+            probs = nn.softmax(logits)
+            
+            if do_sample:
+                idx_next = random.categorical(rng, logits, axis=-1)
+            else:
+                idx_next = jnp.argmax(probs, axis=-1)
+            
+            idx = jnp.concatenate((idx, idx_next[:, None]), axis=1)
+
+        return idx
+
