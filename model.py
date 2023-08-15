@@ -178,42 +178,66 @@ class GPT(nn.Module):
         return model
 
     def configure_optimizers(self, train_config):
-    """
-    Set up the optimizer for the JAX/Flax model.
-    """
+        """
+        Set up the optimizer for the JAX/Flax model.
+        """
 
-    decay_params = []
-    no_decay_params = []
+        decay_params = []
+        no_decay_params = []
 
-    whitelist_weight_modules = (flax.linen.Dense,)
-    blacklist_weight_modules = (flax.linen.LayerNorm, flax.linen.Embed,)
+        whitelist_weight_modules = (flax.linen.Dense,)
+        blacklist_weight_modules = (flax.linen.LayerNorm, flax.linen.Embed,)
 
-    params = flax.traverse_util.flatten_dict(self.params)
-    
-    for (module_name, param_name), param_value in params.items():
-        fpn = f"{module_name}.{param_name}"
+        params = flax.traverse_util.flatten_dict(self.params)
+        
+        for (module_name, param_name), param_value in params.items():
+            fpn = f"{module_name}.{param_name}"
 
-        if param_name.endswith('bias'):
-            no_decay_params.append(fpn)
-        elif param_name.endswith('weight') and isinstance(getattr(self, module_name), whitelist_weight_modules):
-            decay_params.append(fpn)
-        elif param_name.endswith('weight') and isinstance(getattr(self, module_name), blacklist_weight_modules):
-            no_decay_params.append(fpn)
+            if param_name.endswith('bias'):
+                no_decay_params.append(fpn)
+            elif param_name.endswith('weight') and isinstance(getattr(self, module_name), whitelist_weight_modules):
+                decay_params.append(fpn)
+            elif param_name.endswith('weight') and isinstance(getattr(self, module_name), blacklist_weight_modules):
+                no_decay_params.append(fpn)
 
-    # Ensure no overlap and coverage of parameters
-    inter_params = set(decay_params) & set(no_decay_params)
-    union_params = set(decay_params) | set(no_decay_params)
-    assert len(inter_params) == 0, f"Parameters {inter_params} made it into both decay/no_decay sets!"
-    assert len(set(params.keys()) - union_params) == 0, f"Parameters {set(params.keys()) - union_params} were not separated into either decay/no_decay set!"
+        # Ensure no overlap and coverage of parameters
+        inter_params = set(decay_params) & set(no_decay_params)
+        union_params = set(decay_params) | set(no_decay_params)
+        assert len(inter_params) == 0, f"Parameters {inter_params} made it into both decay/no_decay sets!"
+        assert len(set(params.keys()) - union_params) == 0, f"Parameters {set(params.keys()) - union_params} were not separated into either decay/no_decay set!"
 
-    weight_decay = optax.adamw(train_config.weight_decay)
-    no_weight_decay = optax.adamw(0.0)
-    
-    optimizer = optax.chain(
-        optax.masked(weight_decay, mask=decay_params),
-        optax.masked(no_weight_decay, mask=no_decay_params),
-        optax.scale_by_adam(betas=train_config.betas),
-        optax.scale(-train_config.learning_rate),
-    )
-    
-    return optimizer
+        weight_decay = optax.adamw(train_config.weight_decay)
+        no_weight_decay = optax.adamw(0.0)
+        
+        optimizer = optax.chain(
+            optax.masked(weight_decay, mask=decay_params),
+            optax.masked(no_weight_decay, mask=no_decay_params),
+            optax.scale_by_adam(betas=train_config.betas),
+            optax.scale(-train_config.learning_rate),
+        )
+        
+        return optimizer
+
+    def forward(self, idx, targets=None):
+        device = idx.device
+        b, t = idx.shape
+        assert t <= self.block_size, f"Cannot forward sequence of length {t}, block size is only {self.block_size}"
+        pos = jnp.arange(0, t, dtype=jnp.int32).reshape(1, -1)  # shape (1, t)
+
+        # forward the GPT model itself
+        tok_emb = self.transformer.wte(idx)  # token embeddings of shape (b, t, n_embd)
+        pos_emb = self.transformer.wpe(pos)  # position embeddings of shape (1, t, n_embd)
+        x = self.transformer.drop(tok_emb + pos_emb)
+        for block in self.transformer.h:
+            x = block(x)
+        x = self.transformer.ln_f(x)
+        logits = self.lm_head(x)
+
+        # if we are given some desired targets also calculate the loss
+        loss = None
+        if targets is not None:
+            flat_logits = logits.reshape(-1, logits.shape[-1])
+            flat_targets = targets.reshape(-1)
+            loss = optax.softmax_cross_entropy(flat_logits, flat_targets).mean()
+
+        return logits, loss
