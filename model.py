@@ -85,8 +85,8 @@ class Block(nn.Module):
         return self.dropout(self.c_proj(self.act(self.c_fc(x))))
 
     def __call__(self, x):
-        x = x + self.attn(self.ln_1(x))
-        x = x + self.mlpf(self.ln_2(x))
+        x += self.attn(self.ln_1(x))
+        x += self.mlpf(self.ln_2(x))
         return x
 
 
