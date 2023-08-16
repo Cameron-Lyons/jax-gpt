@@ -79,12 +79,11 @@ class Trainer:
         self.opt_state = self.optimizer.init(model)
 
         # setup the dataloader
-        train_loader = DataLoader(
+        train_loader = data_loader(
             self.train_dataset,
             # The sampler might need to be adapted for your purposes
             shuffle=True,
             batch_size=config.batch_size,
-            num_workers=config.num_workers,
         )
 
         data_iter = iter(train_loader)
