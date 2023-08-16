@@ -5,7 +5,9 @@ so nothing in this file really has anything to do with GPT specifically.
 
 import time
 from collections import defaultdict
-
+import jax
+import jax.numpy as jnp
+import optax
 from mingpt.utils import CfgNode as CN
 
 
@@ -55,3 +57,63 @@ class Trainer:
     def trigger_callbacks(self, onevent: str):
         for callback in self.callbacks.get(onevent, []):
             callback(self)
+
+    def run(self):
+        model, config = self.model, self.config
+
+        # setup the optimizer
+        self.optimizer = optax.adam(config.learning_rate)
+        self.opt_state = self.optimizer.init(model)
+
+        # setup the dataloader
+        train_loader = DataLoader(
+            self.train_dataset,
+            # The sampler might need to be adapted for your purposes
+            shuffle=True,
+            batch_size=config.batch_size,
+            num_workers=config.num_workers,
+        )
+
+        data_iter = iter(train_loader)
+
+        @jax.jit
+        def train_step(params, x, y, opt_state):
+            def loss_fn(params):
+                logits, loss = model.apply({"params": params}, x, y)
+                return loss
+
+            grads = jax.grad(loss_fn)(params)
+            grads = jax.tree_map(
+                lambda g: jnp.clip(g, -config.grad_norm_clip, config.grad_norm_clip),
+                grads,
+            )
+            updates, opt_state = self.optimizer.update(grads, opt_state)
+            new_params = optax.apply_updates(params, updates)
+            return new_params, opt_state
+
+        self.iter_num = 0
+        self.iter_time = time.time()
+
+        while True:
+            try:
+                batch = next(data_iter)
+            except StopIteration:
+                data_iter = iter(train_loader)
+                batch = next(data_iter)
+
+            x, y = batch
+
+            model.params, self.opt_state = train_step(
+                model.params, x, y, self.opt_state
+            )
+
+            # Trigger callbacks if you have them
+            # self.trigger_callbacks('on_batch_end')
+
+            self.iter_num += 1
+            tnow = time.time()
+            self.iter_dt = tnow - self.iter_time
+            self.iter_time = tnow
+
+            if config.max_iters is not None and self.iter_num >= config.max_iters:
+                break
