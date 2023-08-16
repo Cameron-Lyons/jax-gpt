@@ -11,6 +11,19 @@ import optax
 from mingpt.utils import CfgNode as CN
 
 
+def data_loader(dataset, batch_size, shuffle=True):
+    """A simple data loader using Python generators."""
+    indices = jnp.arange(len(dataset))
+    if shuffle:
+        indices = jnp.random.permutation(indices)
+    for i in range(0, len(indices), batch_size):
+        batch_idx = indices[i : i + batch_size]
+        batch = [dataset[idx] for idx in batch_idx]
+        yield tuple(
+            map(jnp.array, zip(*batch))
+        )  # Assuming each item in dataset is a tuple (x, y)
+
+
 class Trainer:
     @staticmethod
     def get_default_config():
