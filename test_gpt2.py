@@ -25,7 +25,6 @@ def test_basic_functions():
     """Test basic mathematical functions."""
     print("Testing basic functions...")
     
-    # Test linear function
     x = jnp.array([[1.0, 2.0], [3.0, 4.0]])
     w = jnp.array([[0.5, 0.5], [0.5, 0.5]])
     b = jnp.array([1.0, 1.0])
@@ -34,13 +33,11 @@ def test_basic_functions():
     result = linear(x, w, b)
     assert result.shape == (2, 2)
     
-    # Test softmax
     from gpt2 import softmax
     logits = jnp.array([1.0, 2.0, 3.0])
     probs = softmax(logits)
     assert jnp.allclose(jnp.sum(probs), 1.0)
     
-    # Test GELU
     from gpt2 import gelu
     x = jnp.array([0.0, 1.0, -1.0])
     result = gelu(x)
@@ -55,7 +52,6 @@ def test_attention():
     
     from gpt2 import attention
     
-    # Create dummy inputs
     q = jnp.array([[1.0, 2.0], [3.0, 4.0]])
     k = jnp.array([[1.0, 2.0], [3.0, 4.0]])
     v = jnp.array([[1.0, 2.0], [3.0, 4.0]])
@@ -72,19 +68,16 @@ def test_model_loading():
     print("Testing model loading...")
     
     try:
-        # This will download the model if not present
         encoder, hparams, params = load_encoder_hparams_and_params("124M", "models")
         
         assert encoder is not None
         assert hparams is not None
         assert params is not None
         
-        # Test encoding/decoding
         text = "Hello, world!"
         tokens = encoder.encode(text)
         decoded = encoder.decode(tokens)
         
-        # Note: BPE encoding might not be exactly reversible
         assert len(tokens) > 0
         
         print("✅ Model loading test passed")
@@ -100,7 +93,6 @@ def test_generation():
     try:
         encoder, hparams, params = load_encoder_hparams_and_params("124M", "models")
         
-        # Test basic generation
         input_ids = encoder.encode("Hello")
         output_ids = generate(
             input_ids, 
@@ -123,13 +115,10 @@ def test_jit_compilation():
     """Test JIT compilation."""
     print("Testing JIT compilation...")
     
-    # Test that JIT-compiled functions work
     from gpt2 import linear, softmax, gelu
     
-    # These should be JIT-compiled
     x = jnp.array([1.0, 2.0, 3.0])
     
-    # Test that functions are callable
     result1 = linear(x.reshape(1, -1), jnp.eye(3), jnp.zeros(3))
     result2 = softmax(x)
     result3 = gelu(x)
@@ -149,7 +138,6 @@ def test_sampling_strategies():
         encoder, hparams, params = load_encoder_hparams_and_params("124M", "models")
         input_ids = encoder.encode("Test")
         
-        # Test different temperature values
         for temp in [0.5, 1.0, 1.5]:
             output_ids = generate(
                 input_ids, 

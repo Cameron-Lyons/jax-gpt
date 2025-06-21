@@ -2,7 +2,7 @@
 Flax-based GPT-2 model for training with the modern trainer.
 """
 
-from typing import Optional, Dict, Any
+from typing import Dict, Any
 import jax
 import jax.numpy as jnp
 from flax import linen as nn
