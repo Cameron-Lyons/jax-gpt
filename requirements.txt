@@ -1,0 +1,22 @@
+# Core JAX dependencies (required)
+jax>=0.6.2
+jaxlib>=0.6.2
+
+# Model loading and downloading (required)
+tensorflow>=2.19.0
+requests>=2.32.4
+tqdm>=4.67.1
+
+# Tokenization (required)
+regex>=2022.10.31
+
+# Training dependencies (optional - for modern trainer)
+optax>=0.2.5
+flax>=0.10.6
+orbax-checkpoint>=0.5.0
+
+# Logging (optional)
+wandb>=0.17.0
+
+# Data handling (included with JAX)
+numpy>=2.3.0
