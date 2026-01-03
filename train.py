@@ -1,277 +1,339 @@
 """
-Modern training script for JAX GPT-2 using the improved trainer.
+This training script can be run both on a single gpu in debug mode,
+and also in a larger training run with distributed data parallel (DDP).
+
+To run on a single GPU, example:
+$ python train.py config/train_shakespeare_char.py
+
+To run with DDP on 4 gpus on 1 node, example:
+$ python train.py config/train_gpt2.py
 """
 
+import os
+import time
+import math
 import pickle
-import argparse
-from pathlib import Path
-from typing import Literal
+from contextlib import nullcontext
 
+import numpy as np
 import jax
 import jax.numpy as jnp
 from jax import random
+import optax
+from flax.training import train_state
 
-from trainer import ModernTrainer, TrainingConfig
-from flax_gpt2 import create_gpt2_model, get_model_config, print_model_summary
-from utils import load_encoder_hparams_and_params
-from parameter_converter import initialize_model_with_pretrained_weights
+from model import GPT, GPTConfig
+
+# -----------------------------------------------------------------------------
+# default config values designed to train a gpt2 (124M) on OpenWebText
+# I/O
+out_dir = 'out'
+eval_interval = 2000
+log_interval = 1
+eval_iters = 200
+eval_only = False  # if True, script exits right after the first eval
+always_save_checkpoint = True  # if True, always save a checkpoint after each eval
+init_from = 'scratch'  # 'scratch' or 'resume' or 'gpt2*'
+# wandb logging
+wandb_log = False  # disabled by default
+wandb_project = 'jax-gpt'
+wandb_run_name = 'gpt2'  # 'run' + str(time.time())
+# data
+dataset = 'openwebtext'
+gradient_accumulation_steps = 5 * 8  # used to simulate larger batch sizes
+batch_size = 12  # if gradient_accumulation_steps > 1, this is the micro-batch size
+block_size = 1024
+# model
+n_layer = 12
+n_head = 12
+n_embd = 768
+dropout = 0.0  # for pretraining 0 is good, for finetuning try 0.1+
+bias = True  # do we use bias inside LayerNorm and Linear layers?
+# adamw optimizer
+learning_rate = 6e-4  # max learning rate
+max_iters = 600000  # total number of training iterations
+weight_decay = 1e-1
+beta1 = 0.9
+beta2 = 0.95
+grad_clip = 1.0  # clip gradients at this value, or disable if == 0.0
+# learning rate decay settings
+decay_lr = True  # whether to decay the learning rate
+warmup_iters = 2000  # how many steps to warm up for
+lr_decay_iters = 600000  # should be ~= max_iters per Chinchilla
+min_lr = 6e-5  # minimum learning rate, should be ~= learning_rate/10 per Chinchilla
+# system
+device = 'gpu'  # 'cpu', 'gpu', or 'tpu'
+dtype = 'bfloat16'  # 'float32', 'float16', or 'bfloat16'
+compile = True  # use JAX JIT compilation (default True for performance)
+seed = 1337
+# -----------------------------------------------------------------------------
+config_keys = [k for k, v in globals().items() if not k.startswith('_') and isinstance(v, (int, float, bool, str))]
+exec(open('configurator.py').read())  # overrides from command line or config file
+config = {k: globals()[k] for k in config_keys}  # will be useful for logging
+# -----------------------------------------------------------------------------
+
+# set random seeds
+master_rng = random.PRNGKey(seed)
+
+# logging
+if wandb_log:
+    import wandb
+    wandb.init(project=wandb_project, name=wandb_run_name, config=config)
+
+# data loading
+data_dir = os.path.join('data', dataset)
 
 
-def load_training_data(data_dir: str) -> tuple[jax.Array, jax.Array]:
-    """Load training and validation data."""
-    data_path = Path(data_dir)
-    
-    train_data = jnp.load(str(data_path / "train.bin"), dtype=jnp.uint16, mode="r")
-    val_data = jnp.load(str(data_path / "val.bin"), dtype=jnp.uint16, mode="r")
-    
-    print(f"Loaded training data: {len(train_data):,} tokens")
-    print(f"Loaded validation data: {len(val_data):,} tokens")
-    
-    return train_data, val_data
-
-
-def get_vocab_size(data_dir: str) -> int:
-    """Get vocabulary size from metadata."""
-    meta_path = Path(data_dir) / "meta.pkl"
-    if meta_path.exists():
-        with open(meta_path, "rb") as f:
-            meta = pickle.load(f)
-        vocab_size = meta["vocab_size"]
-        print(f"Found vocab_size = {vocab_size} in {meta_path}")
-        return vocab_size
+def get_batch(split, rng):
+    """Load data from disk and return a batch."""
+    # We recreate np.memmap every batch to avoid a memory leak
+    if split == 'train':
+        data = np.memmap(os.path.join(data_dir, 'train.bin'), dtype=np.uint16, mode='r')
     else:
-        print("No meta.pkl found, using default vocab_size = 50304")
-        return 50304
+        data = np.memmap(os.path.join(data_dir, 'val.bin'), dtype=np.uint16, mode='r')
+
+    ix = random.randint(rng, (batch_size,), 0, len(data) - block_size)
+    ix = np.array(ix)  # Convert to numpy for indexing
+
+    x = jnp.stack([jnp.array(data[i:i + block_size].astype(np.int32)) for i in ix])
+    y = jnp.stack([jnp.array(data[i + 1:i + 1 + block_size].astype(np.int32)) for i in ix])
+
+    return x, y
 
 
-def create_training_config(
-    model_size: Literal["124M", "355M", "774M", "1558M"] = "124M",
-    batch_size: int = 32,
-    max_iters: int = 100000,
-    learning_rate: float = 6e-4,
-    weight_decay: float = 0.1,
-    warmup_iters: int = 2000,
-    eval_interval: int = 2000,
-    save_interval: int = 5000,
-    use_wandb: bool = False,
-    out_dir: str = "out"
-) -> TrainingConfig:
-    """Create training configuration."""
-    
-    return TrainingConfig(
-        model_size=model_size,
-        block_size=1024,
-        vocab_size=50304,  # Will be updated based on data
-        batch_size=batch_size,
-        max_iters=max_iters,
-        learning_rate=learning_rate,
-        weight_decay=weight_decay,
-        warmup_iters=warmup_iters,
-        lr_decay_iters=max_iters,
-        min_lr=learning_rate * 0.1,
-        grad_clip=1.0,
-        beta1=0.9,
-        beta2=0.95,
-        eps=1e-8,
-        eval_interval=eval_interval,
-        eval_iters=200,
-        save_interval=save_interval,
-        seed=42,
-        dtype="bfloat16",
-        compile=True,
-        log_interval=10,
-        use_wandb=use_wandb,
-        project_name="jax-gpt2",
-        save_dir=out_dir,
-        max_checkpoints=5
+# init these up here, can override if init_from='resume' (i.e. from a checkpoint)
+iter_num = 0
+best_val_loss = 1e9
+
+# attempt to derive vocab_size from the dataset
+meta_path = os.path.join(data_dir, 'meta.pkl')
+meta_vocab_size = None
+if os.path.exists(meta_path):
+    with open(meta_path, 'rb') as f:
+        meta = pickle.load(f)
+    meta_vocab_size = meta['vocab_size']
+    print(f"found vocab_size = {meta_vocab_size} (inside {meta_path})")
+
+# model init
+model_args = dict(n_layer=n_layer, n_head=n_head, n_embd=n_embd, block_size=block_size,
+                  bias=bias, vocab_size=None, embd_pdrop=dropout, resid_pdrop=dropout,
+                  attn_pdrop=dropout)  # start with model_args from command line
+
+if init_from == 'scratch':
+    # init a new model from scratch
+    print("Initializing a new model from scratch")
+    # determine the vocab size we'll use for from-scratch training
+    if meta_vocab_size is None:
+        print("defaulting to vocab_size of GPT-2 to 50304 (50257 rounded up for efficiency)")
+    model_args['vocab_size'] = meta_vocab_size if meta_vocab_size is not None else 50304
+
+    gptconf = GPTConfig(**model_args)
+    model = GPT(gptconf)
+
+    # Initialize model parameters
+    master_rng, init_rng = random.split(master_rng)
+    dummy_input = jnp.ones((batch_size, block_size), dtype=jnp.int32)
+    variables = model.init(init_rng, dummy_input, training=False)
+    params = variables['params']
+
+elif init_from == 'resume':
+    print(f"Resuming training from {out_dir}")
+    # resume training from a checkpoint
+    ckpt_path = os.path.join(out_dir, 'ckpt.pkl')
+    with open(ckpt_path, 'rb') as f:
+        checkpoint = pickle.load(f)
+    checkpoint_model_args = checkpoint['model_args']
+    # force these config attributes to be equal otherwise we can't even resume training
+    # the rest of the attributes (e.g. dropout) can stay as desired from command line
+    for k in ['n_layer', 'n_head', 'n_embd', 'block_size', 'bias', 'vocab_size']:
+        model_args[k] = checkpoint_model_args[k]
+    # create the model
+    gptconf = GPTConfig(**model_args)
+    model = GPT(gptconf)
+    params = checkpoint['params']
+    iter_num = checkpoint['iter_num']
+    best_val_loss = checkpoint['best_val_loss']
+
+elif init_from.startswith('gpt2'):
+    print(f"Initializing from OpenAI GPT-2 weights: {init_from}")
+    # initialize from OpenAI GPT-2 weights
+    from utils import load_encoder_hparams_and_params
+    from parameter_converter import convert_functional_to_flax_params
+
+    model_size_map = {
+        'gpt2': '124M',
+        'gpt2-medium': '355M',
+        'gpt2-large': '774M',
+        'gpt2-xl': '1558M'
+    }
+    model_size = model_size_map.get(init_from, '124M')
+
+    encoder, hparams, pretrained_params = load_encoder_hparams_and_params(model_size, 'models')
+
+    # Override model args from pretrained model
+    model_args['n_layer'] = hparams['n_layer']
+    model_args['n_head'] = hparams['n_head']
+    model_args['n_embd'] = hparams['n_embd']
+    model_args['block_size'] = hparams['n_ctx']
+    model_args['vocab_size'] = hparams['n_vocab']
+    model_args['bias'] = True
+
+    gptconf = GPTConfig(**model_args)
+    model = GPT(gptconf)
+
+    # Convert pretrained params to Flax format
+    params = convert_functional_to_flax_params(pretrained_params, gptconf)
+
+else:
+    raise ValueError(f"Unknown init_from: {init_from}")
+
+print(f"Model config: {gptconf}")
+
+# optimizer
+def get_lr(step):
+    """Learning rate schedule with warmup and cosine decay."""
+    # 1) linear warmup for warmup_iters steps
+    if step < warmup_iters:
+        return learning_rate * step / warmup_iters
+    # 2) if it > lr_decay_iters, return min learning rate
+    if step > lr_decay_iters:
+        return min_lr
+    # 3) in between, use cosine decay down to min learning rate
+    decay_ratio = (step - warmup_iters) / (lr_decay_iters - warmup_iters)
+    assert 0 <= decay_ratio <= 1
+    coeff = 0.5 * (1.0 + math.cos(math.pi * decay_ratio))  # coeff ranges 0..1
+    return min_lr + coeff * (learning_rate - min_lr)
+
+
+def create_optimizer(learning_rate_fn):
+    """Create AdamW optimizer with learning rate schedule."""
+    return optax.chain(
+        optax.clip_by_global_norm(grad_clip) if grad_clip > 0.0 else optax.identity(),
+        optax.adamw(
+            learning_rate=learning_rate_fn,
+            b1=beta1,
+            b2=beta2,
+            weight_decay=weight_decay
+        )
     )
 
 
-def train_from_scratch(
-    config: TrainingConfig,
-    train_data: jax.Array,
-    val_data: jax.Array,
-    vocab_size: int
-):
-    """Train a model from scratch."""
-    print("🚀 Training GPT-2 from scratch")
-    print("=" * 50)
-    
-    config.vocab_size = vocab_size
-    
-    model_config = get_model_config(config.model_size)
-    model_config.vocab_size = vocab_size
-    model = create_gpt2_model(model_config)
-    
-    print_model_summary(model, model_config)
-    
-    trainer = ModernTrainer(config, model, train_data, val_data)
-    
-    trainer.train()
-    
-    return trainer.get_model_params()
+# Create learning rate schedule
+lr_schedule = optax.join_schedules(
+    schedules=[
+        optax.linear_schedule(0.0, learning_rate, warmup_iters),
+        optax.cosine_decay_schedule(learning_rate, lr_decay_iters - warmup_iters, min_lr / learning_rate)
+    ],
+    boundaries=[warmup_iters]
+) if decay_lr else optax.constant_schedule(learning_rate)
+
+optimizer = create_optimizer(lr_schedule)
+opt_state = optimizer.init(params)
 
 
-def train_from_pretrained(
-    config: TrainingConfig,
-    train_data: jax.Array,
-    val_data: jax.Array,
-    vocab_size: int
-):
-    """Fine-tune a pretrained model."""
-    print("🔄 Fine-tuning pretrained GPT-2")
-    print("=" * 50)
-    
-    config.vocab_size = vocab_size
-    config.learning_rate = 1e-5
-    config.warmup_iters = 100
-    
-    print("Loading pretrained GPT-2 weights...")
-    encoder, hparams, pretrained_params = load_encoder_hparams_and_params(config.model_size, "models")
-    
-    model_config = get_model_config(config.model_size)
-    model_config.vocab_size = vocab_size
-    model = create_gpt2_model(model_config)
-    
-    print_model_summary(model, model_config)
-    
-    dummy_input = jnp.ones((config.batch_size, config.block_size), dtype=jnp.int32)
-    
-    print("Converting pretrained parameters to Flax format...")
-    pretrained_state = initialize_model_with_pretrained_weights(
-        model, pretrained_params, dummy_input
-    )
-    
-    trainer = ModernTrainer(config, model, train_data, val_data)
-    
-    trainer.state = pretrained_state.replace(tx=trainer.optimizer)
-    
-    print("Starting fine-tuning with pretrained weights...")
-    trainer.train()
-    
-    return trainer.get_model_params()
+# Training and evaluation functions
+@jax.jit
+def train_step(params, opt_state, x, y, rng):
+    """Single training step."""
+    def loss_fn(params):
+        logits, loss = model.apply({'params': params}, x, targets=y, training=True, rngs={'dropout': rng})
+        return loss, logits
+
+    (loss, logits), grads = jax.value_and_grad(loss_fn, has_aux=True)(params)
+    updates, opt_state = optimizer.update(grads, opt_state, params)
+    params = optax.apply_updates(params, updates)
+
+    return params, opt_state, loss
 
 
-def resume_training(
-    config: TrainingConfig,
-    train_data: jax.Array,
-    val_data: jax.Array,
-    vocab_size: int
-):
-    """Resume training from a checkpoint."""
-    print("📂 Resuming training from checkpoint")
-    print("=" * 50)
-    
-    config.vocab_size = vocab_size
-    
-    model_config = get_model_config(config.model_size)
-    model_config.vocab_size = vocab_size
-    model = create_gpt2_model(model_config)
-    
-    print_model_summary(model, model_config)
-    
-    trainer = ModernTrainer(config, model, train_data, val_data)
-    
-    trainer.train()
-    
-    return trainer.get_model_params()
+@jax.jit
+def eval_step(params, x, y):
+    """Single evaluation step."""
+    logits, loss = model.apply({'params': params}, x, targets=y, training=False)
+    return loss
 
 
-def main():
-    """Main training function."""
-    parser = argparse.ArgumentParser(description="Train JAX GPT-2 model")
-    
-    parser.add_argument("--data_dir", type=str, default="data/openwebtext", 
-                       help="Directory containing training data")
-    parser.add_argument("--dataset", type=str, default="openwebtext",
-                       help="Dataset name")
-
-    parser.add_argument("--model_size", type=str, default="124M",
-                       choices=["124M", "355M", "774M", "1558M"],
-                       help="Model size to train")
-    parser.add_argument("--init_from", type=str, default="scratch",
-                       choices=["scratch", "resume", "gpt2"],
-                       help="Initialization method")
-    
-    parser.add_argument("--batch_size", type=int, default=32,
-                       help="Batch size for training")
-    parser.add_argument("--max_iters", type=int, default=100000,
-                       help="Maximum training iterations")
-    parser.add_argument("--learning_rate", type=float, default=6e-4,
-                       help="Learning rate")
-    parser.add_argument("--weight_decay", type=float, default=0.1,
-                       help="Weight decay")
-    parser.add_argument("--warmup_iters", type=int, default=2000,
-                       help="Warmup iterations")
-    
-    parser.add_argument("--eval_interval", type=int, default=2000,
-                       help="Evaluation interval")
-    parser.add_argument("--save_interval", type=int, default=5000,
-                       help="Checkpoint save interval")
-    
-    parser.add_argument("--out_dir", type=str, default="out",
-                       help="Output directory")
-    parser.add_argument("--use_wandb", action="store_true",
-                       help="Use Weights & Biases for logging")
-    parser.add_argument("--seed", type=int, default=42,
-                       help="Random seed")
-    
-    args = parser.parse_args()
-    
-    random.PRNGKey(args.seed)
-    
-    print("🎯 JAX GPT-2 Training")
-    print("=" * 60)
-    print(f"Model size: {args.model_size}")
-    print(f"Initialization: {args.init_from}")
-    print(f"Batch size: {args.batch_size}")
-    print(f"Max iterations: {args.max_iters}")
-    print(f"Learning rate: {args.learning_rate}")
-    print(f"Output directory: {args.out_dir}")
-    print()
-    
-    print("📊 Loading training data...")
-    try:
-        train_data, val_data = load_training_data(args.data_dir)
-        vocab_size = get_vocab_size(args.data_dir)
-    except FileNotFoundError:
-        print(f"❌ Data not found in {args.data_dir}")
-        print("Please ensure the data directory contains train.bin, val.bin, and meta.pkl")
-        return
-    
-    config = create_training_config(
-        model_size=args.model_size,
-        batch_size=args.batch_size,
-        max_iters=args.max_iters,
-        learning_rate=args.learning_rate,
-        weight_decay=args.weight_decay,
-        warmup_iters=args.warmup_iters,
-        eval_interval=args.eval_interval,
-        save_interval=args.save_interval,
-        use_wandb=args.use_wandb,
-        out_dir=args.out_dir
-    )
-    
-    try:
-        if args.init_from == "scratch":
-            final_params = train_from_scratch(config, train_data, val_data, vocab_size)
-        elif args.init_from == "resume":
-            final_params = resume_training(config, train_data, val_data, vocab_size)
-        elif args.init_from == "gpt2":
-            final_params = train_from_pretrained(config, train_data, val_data, vocab_size)
-        else:
-            raise ValueError(f"Unknown initialization method: {args.init_from}")
-        
-        print("✅ Training completed successfully!")
-        print(f"Final model parameters saved to {args.out_dir}")
-        
-    except KeyboardInterrupt:
-        print("\n⚠️  Training interrupted by user")
-        print("Checkpoint should be available for resuming")
-    except Exception as e:
-        print(f"\n❌ Training failed: {e}")
-        raise
+def estimate_loss(params, rng):
+    """Estimate loss on train and validation sets."""
+    out = {}
+    for split in ['train', 'val']:
+        losses = []
+        for k in range(eval_iters):
+            rng, batch_rng = random.split(rng)
+            X, Y = get_batch(split, batch_rng)
+            loss = eval_step(params, X, Y)
+            losses.append(float(loss))
+        out[split] = np.mean(losses)
+    return out
 
 
-if __name__ == "__main__":
-    main()
+# training loop
+print(f"Starting training from iteration {iter_num}")
+print(f"Training config: batch_size={batch_size}, block_size={block_size}, n_layer={n_layer}, n_head={n_head}, n_embd={n_embd}")
+print(f"Learning rate: {learning_rate}, weight_decay={weight_decay}, warmup_iters={warmup_iters}")
+
+X, Y = get_batch('train', master_rng)  # fetch the very first batch
+t0 = time.time()
+local_iter_num = 0  # number of iterations in the lifetime of this process
+running_mfu = -1.0
+
+while True:
+    # determine and set the learning rate for this iteration
+    lr = get_lr(iter_num) if decay_lr else learning_rate
+
+    # evaluate the loss on train/val sets and write checkpoints
+    if iter_num % eval_interval == 0:
+        losses = estimate_loss(params, master_rng)
+        print(f"step {iter_num}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}")
+
+        if wandb_log:
+            wandb.log({
+                "iter": iter_num,
+                "train/loss": losses['train'],
+                "val/loss": losses['val'],
+                "lr": lr,
+            })
+
+        if losses['val'] < best_val_loss or always_save_checkpoint:
+            best_val_loss = losses['val']
+            if iter_num > 0:
+                checkpoint = {
+                    'params': params,
+                    'model_args': model_args,
+                    'iter_num': iter_num,
+                    'best_val_loss': best_val_loss,
+                    'config': config,
+                    'dataset': dataset,
+                }
+                print(f"saving checkpoint to {out_dir}")
+                os.makedirs(out_dir, exist_ok=True)
+                with open(os.path.join(out_dir, 'ckpt.pkl'), 'wb') as f:
+                    pickle.dump(checkpoint, f)
+
+    if iter_num == 0 and eval_only:
+        break
+
+    # forward backward update, with optional gradient accumulation to simulate larger batch size
+    for micro_step in range(gradient_accumulation_steps):
+        master_rng, batch_rng, step_rng = random.split(master_rng, 3)
+        X, Y = get_batch('train', batch_rng)
+        params, opt_state, loss = train_step(params, opt_state, X, Y, step_rng)
+
+    # timing and logging
+    t1 = time.time()
+    dt = t1 - t0
+    t0 = t1
+
+    if iter_num % log_interval == 0:
+        # get loss as float
+        lossf = float(loss) * gradient_accumulation_steps
+        print(f"iter {iter_num}: loss {lossf:.4f}, time {dt * 1000:.2f}ms, lr {lr:.2e}")
+
+    iter_num += 1
+    local_iter_num += 1
+
+    # termination conditions
+    if iter_num > max_iters:
+        break
+
+print("Training complete!")

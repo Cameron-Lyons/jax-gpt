@@ -36,7 +36,8 @@ class GPTConfig:
     embd_pdrop: float = 0.1
     resid_pdrop: float = 0.1
     attn_pdrop: float = 0.1
-    use_bias: bool = True
+    bias: bool = True  # use bias in Linears and LayerNorms, like GPT-2
+    use_bias: bool = True  # alias for bias (for backward compatibility)
     use_rope: bool = False
     use_flash_attention: bool = False
     gradient_checkpointing: bool = False
@@ -47,6 +48,10 @@ class GPTConfig:
     scale_attn_weights: bool = True
     scale_attn_by_inverse_layer_idx: bool = False
     reorder_and_upcast_attn: bool = False
+
+    def __post_init__(self):
+        # Sync bias and use_bias
+        self.use_bias = self.bias
 
 
 class NewGELU(nn.Module):

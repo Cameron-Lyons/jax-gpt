@@ -17,7 +17,14 @@ from jax import random, jit, grad
 import optax
 
 from model import GPTConfig, GPT
-from utils import ModelManager, MetricsTracker
+
+# Model configurations for different sizes
+MODEL_CONFIGS = {
+    "124M": {"n_layer": 12, "n_head": 12, "n_embd": 768},
+    "355M": {"n_layer": 24, "n_head": 16, "n_embd": 1024},
+    "774M": {"n_layer": 36, "n_head": 20, "n_embd": 1280},
+    "1558M": {"n_layer": 48, "n_head": 25, "n_embd": 1600},
+}
 
 
 @dataclass
@@ -58,7 +65,6 @@ class BenchmarkRunner:
     
     def __init__(self, config: BenchmarkConfig):
         self.config = config
-        self.metrics = MetricsTracker()
         self.results = {}
         
         self.setup_device()
@@ -89,13 +95,12 @@ class BenchmarkRunner:
     
     def setup_model(self):
         """Initialize the GPT-2 model."""
-        manager = ModelManager()
-        hparams = manager.load_hparams(self.config.model_size)
-        
+        hparams = MODEL_CONFIGS[self.config.model_size]
+
         self.model_config = GPTConfig(
-            n_layer=hparams.n_layer,
-            n_head=hparams.n_head,
-            n_embd=hparams.n_embd,
+            n_layer=hparams["n_layer"],
+            n_head=hparams["n_head"],
+            n_embd=hparams["n_embd"],
             vocab_size=self.config.vocab_size,
             block_size=self.config.block_size,
             embd_pdrop=0.0,
@@ -230,10 +235,9 @@ class BenchmarkRunner:
         duration = end_time - start_time
         memory_used = end_memory - start_memory if start_memory and end_memory else None
         
-        self.metrics.update(**{
-            f"{name}_time": duration,
-            f"{name}_memory": memory_used
-        })
+        self.results[f"{name}_time"] = duration
+        if memory_used:
+            self.results[f"{name}_memory"] = memory_used
         
         if self.config.verbose:
             print(f"{name}: {duration:.4f}s")
