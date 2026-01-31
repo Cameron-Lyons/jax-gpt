@@ -1,10 +1,13 @@
 """GPT-2 model. For text generation."""
-from typing import List, Dict, Any, Literal, Optional, Tuple
-import jax.numpy as jnp
-import jax
-from jax import jit, random
-from utils import load_encoder_hparams_and_params
+
 from dataclasses import dataclass
+from typing import Any, Dict, List, Literal, Optional, Tuple
+
+import jax
+import jax.numpy as jnp
+from jax import jit, random
+
+from utils import load_encoder_hparams_and_params
 
 
 @dataclass
@@ -12,12 +15,16 @@ class GPTConfig:
     """GPT-2 model configuration."""
 
     block_size: int = 1024
-    vocab_size: int = 50304  # GPT-2 vocab_size of 50257, padded up to nearest multiple of 64 for efficiency
+    vocab_size: int = (
+        50304  # GPT-2 vocab_size of 50257, padded up to nearest multiple of 64 for efficiency
+    )
     n_layer: int = 12
     n_head: int = 12
     n_embd: int = 768
     dropout: float = 0.0
-    bias: bool = True  # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
+    bias: bool = (
+        True  # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
+    )
 
 
 @jit
@@ -53,9 +60,7 @@ def gelu(x: jax.Array) -> jax.Array:
 
 
 @jit
-def layer_norm(
-    x: jax.Array, g: jax.Array, b: jax.Array, eps: float = 1e-5
-) -> jax.Array:
+def layer_norm(x: jax.Array, g: jax.Array, b: jax.Array, eps: float = 1e-5) -> jax.Array:
     """Layer normalization.
     for consistent range to speed up training."""
     mean = jnp.mean(x, axis=-1, keepdims=True)
@@ -66,11 +71,11 @@ def layer_norm(
 @jit
 def attention(q: jax.Array, k: jax.Array, v: jax.Array, mask: jax.Array) -> jax.Array:
     """Scaled dot-product attention."""
-    return softmax(q @ k.T / jnp.sqrt(q.shape[-1]) + mask) @ v
+    return softmax(q @ k.T / jnp.sqrt(q.shape[-1]) + mask) @ v  # type: ignore[no-any-return]
 
 
 @jit
-def causal_self_attention(x: jax.Array, c_attn: jax.Array, c_proj: jax.Array):
+def causal_self_attention(x: jax.Array, c_attn: Dict, c_proj: Dict):
     """Attention layer with a causal mask to prevent attending to future tokens."""
     x = linear(x, **c_attn)
 
@@ -82,9 +87,7 @@ def causal_self_attention(x: jax.Array, c_attn: jax.Array, c_proj: jax.Array):
 
 
 @jit
-def multihead_attn(
-    x: jax.Array, c_attn: jax.Array, c_proj: jax.Array, n_head: int
-) -> jax.Array:
+def multihead_attn(x: jax.Array, c_attn: Dict, c_proj: Dict, n_head: int) -> jax.Array:
     """Multi-head attention layer.
     Splits input into n_head chunks and runs attention on each chunk."""
     x = linear(x, **c_attn)
@@ -93,7 +96,7 @@ def multihead_attn(
     causal_mask = (1 - jnp.tri(x.shape[0], dtype=x.dtype)) * -1e10
     out_heads = [attention(q, k, v, causal_mask) for q, k, v in zip(*qkv_heads)]
     x = jnp.hstack(out_heads)
-    return linear(x, **c_proj)
+    return linear(x, **c_proj)  # type: ignore[no-any-return]
 
 
 @jit
@@ -118,7 +121,7 @@ def transformer_block(x, mlp, attn, ln_1, ln_2, n_head):
 @jit
 def gpt2(inputs: jax.Array, wte: jax.Array, wpe, blocks: Dict, ln_f, n_head: int):
     """GPT-2 model. Consists of an embedding layer and a stack of transformer blocks."""
-    x = wte[inputs] + wpe(jnp.arange(len(inputs)))
+    x = wte[inputs] + wpe[jnp.arange(len(inputs))]
 
     for block in blocks:
         x = transformer_block(x, **block, n_head=n_head)
@@ -142,112 +145,96 @@ def sample_top_p(logits: jax.Array, p: float, rng: jax.Array) -> jax.Array:
     sorted_indices_to_remove = cumulative_probs > p
     sorted_indices_to_remove = jnp.roll(sorted_indices_to_remove, 1)
     sorted_indices_to_remove = sorted_indices_to_remove.at[0].set(False)
-    
+
     indices_to_remove = sorted_indices_to_remove[jnp.argsort(jnp.argsort(logits))]
-    filtered_logits = jnp.where(indices_to_remove, -float('inf'), logits)
+    filtered_logits = jnp.where(indices_to_remove, -float("inf"), logits)
     probs = jax.nn.softmax(filtered_logits)
     return jax.random.categorical(rng, probs)
 
 
 @jit
 def generate_step(
-    inputs: jax.Array, 
-    params: Dict[str, Any], 
-    n_head: int, 
+    inputs: jax.Array,
+    params: Dict[str, Any],
+    n_head: int,
     temperature: float = 1.0,
     top_k: Optional[int] = None,
     top_p: Optional[float] = None,
-    rng: jax.Array = None
+    rng: Optional[jax.Array] = None,
 ) -> Tuple[jax.Array, jax.Array]:
     """Generate one token from the model."""
     logits = gpt2(inputs, **params, n_head=n_head)
     logits = logits[-1] / temperature
-    
+
     if top_k is not None:
-        next_id = sample_top_k(logits, top_k, rng)
+        next_id = sample_top_k(logits, top_k, rng)  # type: ignore[arg-type]
     elif top_p is not None:
-        next_id = sample_top_p(logits, top_p, rng)
+        next_id = sample_top_p(logits, top_p, rng)  # type: ignore[arg-type]
     else:
         next_id = jnp.argmax(logits)
-    
+
     return next_id, logits
 
 
 def generate(
-    inputs: List[int], 
-    params: Dict[str, Any], 
-    n_head: int, 
+    inputs: List[int],
+    params: Dict[str, Any],
+    n_head: int,
     n_tokens_to_generate: int,
     temperature: float = 1.0,
     top_k: Optional[int] = None,
     top_p: Optional[float] = None,
-    rng: jax.Array = None
+    rng: Optional[jax.Array] = None,
 ) -> List[int]:
     """Generate text from a prompt with sampling controls."""
     if rng is None:
         rng = random.PRNGKey(0)
-    
+
     input_array = jnp.array(inputs)
     generated_tokens = []
-    
+
     for _ in range(n_tokens_to_generate):
         rng, step_rng = random.split(rng)
-        next_id, _ = generate_step(
-            input_array, 
-            params, 
-            n_head, 
-            temperature, 
-            top_k, 
-            top_p, 
-            step_rng
-        )
+        next_id, _ = generate_step(input_array, params, n_head, temperature, top_k, top_p, step_rng)
         next_id = int(next_id)
         generated_tokens.append(next_id)
         input_array = jnp.append(input_array, next_id)
-    
+
     return generated_tokens
 
 
 def generate_with_stopping(
-    inputs: List[int], 
-    params: Dict[str, Any], 
-    n_head: int, 
+    inputs: List[int],
+    params: Dict[str, Any],
+    n_head: int,
     max_tokens: int,
     stop_tokens: Optional[List[int]] = None,
     temperature: float = 1.0,
     top_k: Optional[int] = None,
     top_p: Optional[float] = None,
-    rng: jax.Array = None
+    rng: Optional[jax.Array] = None,
 ) -> List[int]:
     """Generate text with stopping conditions."""
     if rng is None:
         rng = random.PRNGKey(0)
-    
+
     if stop_tokens is None:
         stop_tokens = []
-    
+
     input_array = jnp.array(inputs)
     generated_tokens = []
-    
+
     for _ in range(max_tokens):
         rng, step_rng = random.split(rng)
-        next_id, _ = generate_step(
-            input_array, 
-            params, 
-            n_head, 
-            temperature, 
-            top_k, 
-            top_p, 
-            step_rng
-        )
+        next_id, _ = generate_step(input_array, params, n_head, temperature, top_k, top_p, step_rng)
         next_id = int(next_id)
-        
+
         if next_id in stop_tokens:
             break
-            
+
         generated_tokens.append(next_id)
         input_array = jnp.append(input_array, next_id)
-    
+
     return generated_tokens
 
 
@@ -268,14 +255,7 @@ def main(
 
     rng = random.PRNGKey(seed)
     output_ids = generate(
-        input_ids, 
-        params, 
-        hparams["n_head"], 
-        n_tokens_to_generate,
-        temperature,
-        top_k,
-        top_p,
-        rng
+        input_ids, params, hparams["n_head"], n_tokens_to_generate, temperature, top_k, top_p, rng
     )
     output_text = encoder.decode(output_ids)
 

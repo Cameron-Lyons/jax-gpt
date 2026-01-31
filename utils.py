@@ -1,13 +1,12 @@
 """Utilities for JAX GPT-2 models."""
-import json
+
 import logging
-from pathlib import Path
-from typing import Literal, Dict, Any, Tuple, Optional, Union, List
-from dataclasses import dataclass
 import pickle
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 
 import jax.numpy as jnp
-from jax import random
 import tiktoken
 
 logging.basicConfig(level=logging.INFO)
@@ -19,6 +18,7 @@ ModelSize = Literal["124M", "355M", "774M", "1558M"]
 @dataclass
 class ModelConfig:
     """Configuration for GPT-2 model variants."""
+
     n_layer: int
     n_head: int
     n_embd: int
@@ -34,14 +34,14 @@ class TiktokenEncoder:
         self.n_vocab = 50257
 
     def encode(self, text: str) -> List[int]:
-        return self.enc.encode(text, allowed_special={"<|endoftext|>"})
+        return self.enc.encode(text, allowed_special={"<|endoftext|>"})  # type: ignore[no-any-return]
 
     def decode(self, tokens: List[int]) -> str:
-        return self.enc.decode(tokens)
+        return self.enc.decode(tokens)  # type: ignore[no-any-return]
 
 
 def load_encoder_hparams_and_params(
-    model_size: ModelSize, models_dir: str = None
+    model_size: ModelSize, models_dir: Optional[str] = None
 ) -> Tuple[TiktokenEncoder, Dict[str, Any], Dict[str, Any]]:
     """Load encoder, hparams, and params from HuggingFace."""
     try:
@@ -83,7 +83,7 @@ def load_encoder_hparams_and_params(
         "ln_f": {
             "b": to_jax(sd["transformer.ln_f.bias"]),
             "g": to_jax(sd["transformer.ln_f.weight"]),
-        }
+        },
     }
 
     for i in range(config.n_layer):
@@ -123,20 +123,17 @@ def load_encoder_hparams_and_params(
     return encoder, hparams, params
 
 
-def save_checkpoint(params: Dict[str, Any], optimizer_state: Any, step: int,
-                    filepath: Union[str, Path]):
+def save_checkpoint(
+    params: Dict[str, Any], optimizer_state: Any, step: int, filepath: Union[str, Path]
+):
     """Save model checkpoint."""
-    checkpoint = {
-        "params": params,
-        "optimizer_state": optimizer_state,
-        "step": step
-    }
-    with open(filepath, 'wb') as f:
+    checkpoint = {"params": params, "optimizer_state": optimizer_state, "step": step}
+    with open(filepath, "wb") as f:
         pickle.dump(checkpoint, f)
 
 
 def load_checkpoint(filepath: Union[str, Path]) -> Tuple[Dict[str, Any], Any, int]:
     """Load model checkpoint."""
-    with open(filepath, 'rb') as f:
+    with open(filepath, "rb") as f:
         checkpoint = pickle.load(f)
     return checkpoint["params"], checkpoint["optimizer_state"], checkpoint["step"]

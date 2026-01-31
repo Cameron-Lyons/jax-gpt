@@ -1,4 +1,5 @@
 """This file is used to override the default config values in config.py"""
+
 import sys
 from ast import literal_eval
 
@@ -19,7 +20,7 @@ for arg in sys.argv[1:]:
                 attempt = literal_eval(val)
             except (SyntaxError, ValueError):
                 attempt = val
-            assert type(attempt) == type(globals()[key])
+            assert type(attempt) is type(globals()[key])
             print(f"Overriding: {key} = {attempt}")
             globals()[key] = attempt
         else:
