@@ -32,7 +32,7 @@ class TestAutoregressive:
     def test_single_token_generation(self, tiny_model):
         model, variables, config = tiny_model
         x = jnp.array([[1, 2, 3]], dtype=jnp.int32)
-        logits, _ = model.apply(variables, x, training=False)
+        logits, _, _ = model.apply(variables, x, training=False)
         next_logits = logits[:, -1, :]
         assert next_logits.shape == (1, config.vocab_size)
 
@@ -42,7 +42,7 @@ class TestAutoregressive:
         generated = prompt
 
         for _ in range(5):
-            logits, _ = model.apply(variables, generated, training=False)
+            logits, _, _ = model.apply(variables, generated, training=False)
             next_token = jnp.argmax(logits[:, -1, :], axis=-1, keepdims=True)
             generated = jnp.concatenate([generated, next_token], axis=1)
 
@@ -53,7 +53,7 @@ class TestAutoregressive:
         model, variables, config = tiny_model
         prompt = jnp.array([[1, 2, 3]], dtype=jnp.int32)
 
-        logits, _ = model.apply(variables, prompt, training=False)
+        logits, _, _ = model.apply(variables, prompt, training=False)
         last_logits = logits[:, -1, :]
 
         low_temp = last_logits / 0.1
@@ -67,7 +67,7 @@ class TestAutoregressive:
     def test_top_k_filtering(self, tiny_model):
         model, variables, config = tiny_model
         prompt = jnp.array([[1, 2, 3]], dtype=jnp.int32)
-        logits, _ = model.apply(variables, prompt, training=False)
+        logits, _, _ = model.apply(variables, prompt, training=False)
         last_logits = logits[0, -1, :]
 
         k = 10
@@ -82,12 +82,12 @@ class TestAutoregressive:
     def test_generation_respects_block_size(self, tiny_model):
         model, variables, config = tiny_model
         prompt = jnp.ones((1, config.block_size), dtype=jnp.int32)
-        logits, _ = model.apply(variables, prompt, training=False)
+        logits, _, _ = model.apply(variables, prompt, training=False)
         assert logits.shape == (1, config.block_size, config.vocab_size)
 
     def test_deterministic_greedy(self, tiny_model):
         model, variables, config = tiny_model
         prompt = jnp.array([[1, 2, 3]], dtype=jnp.int32)
-        logits1, _ = model.apply(variables, prompt, training=False)
-        logits2, _ = model.apply(variables, prompt, training=False)
+        logits1, _, _ = model.apply(variables, prompt, training=False)
+        logits2, _, _ = model.apply(variables, prompt, training=False)
         assert jnp.allclose(logits1, logits2)

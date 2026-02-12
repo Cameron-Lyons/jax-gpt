@@ -51,6 +51,33 @@ class GPTConfig:
     reorder_and_upcast_attn: bool = False
 
 
+@dataclass
+class KVCache:
+    """Pre-allocated key/value cache for autoregressive generation."""
+
+    k: jax.Array
+    v: jax.Array
+    length: jax.Array
+
+
+def init_kv_cache(
+    batch_size: int,
+    n_layer: int,
+    n_head: int,
+    head_dim: int,
+    max_seq_len: int,
+    dtype: jnp.dtype = jnp.bfloat16,
+) -> list["KVCache"]:
+    """Create a list of empty KV caches, one per layer."""
+    caches = []
+    for _ in range(n_layer):
+        k = jnp.zeros((batch_size, n_head, max_seq_len, head_dim), dtype=dtype)
+        v = jnp.zeros((batch_size, n_head, max_seq_len, head_dim), dtype=dtype)
+        length = jnp.array(0, dtype=jnp.int32)
+        caches.append(KVCache(k=k, v=v, length=length))
+    return caches
+
+
 class NewGELU(nn.Module):
     """Improved GELU activation with better numerical stability."""
 
@@ -68,15 +95,17 @@ class RotaryPositionEmbedding(nn.Module):
     max_position_embeddings: int = 2048
 
     @nn.compact
-    def __call__(self, x: jax.Array, seq_len: int | None = None) -> jax.Array:
+    def __call__(
+        self, x: jax.Array, seq_len: int | None = None, offset: int | jax.Array = 0
+    ) -> jax.Array:
         if seq_len is None:
             seq_len = x.shape[-2]
 
         inv_freq = 1.0 / (10000 ** (jnp.arange(0, self.dim, 2).astype(jnp.float32) / self.dim))
-        sinusoid_inp = jnp.einsum("i,j->ij", jnp.arange(seq_len), inv_freq)
+        sinusoid_inp = jnp.einsum("i,j->ij", jnp.arange(seq_len) + offset, inv_freq)
 
-        sin = jnp.sin(sinusoid_inp)
-        cos = jnp.cos(sinusoid_inp)
+        sin = jnp.concatenate([jnp.sin(sinusoid_inp)] * 2, axis=-1)
+        cos = jnp.concatenate([jnp.cos(sinusoid_inp)] * 2, axis=-1)
 
         x1 = x[..., : self.dim // 2]
         x2 = x[..., self.dim // 2 :]
@@ -103,7 +132,9 @@ class CausalSelfAttention(nn.Module):
     dtype: str = "bfloat16"
 
     @nn.compact
-    def __call__(self, x: jax.Array, training: bool = True) -> jax.Array:
+    def __call__(
+        self, x: jax.Array, training: bool = True, cache: KVCache | None = None
+    ) -> tuple[jax.Array, KVCache | None]:
         B, T, C = x.shape
         head_dim = C // self.n_head
 
@@ -121,14 +152,34 @@ class CausalSelfAttention(nn.Module):
 
         if self.use_rope:
             rope = RotaryPositionEmbedding(dim=head_dim)
-            q = rope(q)
-            k = rope(k)
+            offset = cache.length if cache is not None else 0
+            q = rope(q, offset=offset)
+            k = rope(k, offset=offset)
+
+        new_cache: KVCache | None = None
+        if cache is not None:
+            cache_len = cache.length
+            k_cache = cache.k.at[:, :, cache_len : cache_len + T, :].set(k)
+            v_cache = cache.v.at[:, :, cache_len : cache_len + T, :].set(v)
+            new_cache = KVCache(k=k_cache, v=v_cache, length=cache_len + T)
+
+            k = k_cache[:, :, : cache_len + T, :]
+            v = v_cache[:, :, : cache_len + T, :]
+            T_kv: int | jax.Array = cache_len + T
+        else:
+            T_kv = T
 
         if self.use_flash_attention:
-            q_fa = q.transpose(0, 2, 1, 3)  # (B, T, n_head, head_dim)
-            k_fa = k.transpose(0, 2, 1, 3)
+            q_fa = q.transpose(0, 2, 1, 3)  # (B, T_q, n_head, head_dim)
+            k_fa = k.transpose(0, 2, 1, 3)  # (B, T_kv, n_head, head_dim)
             v_fa = v.transpose(0, 2, 1, 3)
-            y = jax.nn.dot_product_attention(q_fa, k_fa, v_fa, is_causal=True)
+            if cache is not None:
+                row_idx = jnp.arange(T)[None, :, None] + cache.length
+                col_idx = jnp.arange(T_kv)[None, None, :]
+                mask = col_idx <= row_idx
+                y = jax.nn.dot_product_attention(q_fa, k_fa, v_fa, mask=mask)
+            else:
+                y = jax.nn.dot_product_attention(q_fa, k_fa, v_fa, is_causal=True)
             y = y.reshape(B, T, C)
         else:
             scale = 1.0 / math.sqrt(head_dim) if self.scale_attn_weights else 1.0
@@ -142,7 +193,12 @@ class CausalSelfAttention(nn.Module):
             else:
                 att = (q @ k.transpose(0, 1, 3, 2)) * scale
 
-            mask = jnp.triu(jnp.ones((T, T), dtype=att.dtype), k=1)
+            if cache is not None:
+                row_idx = jnp.arange(T)[:, None] + cache.length
+                col_idx = jnp.arange(T_kv)[None, :]
+                mask = (col_idx > row_idx).astype(att.dtype)
+            else:
+                mask = jnp.triu(jnp.ones((T, T_kv), dtype=att.dtype), k=1)
             att = jnp.where(mask == 1, -1e9, att)
 
             att = jax.nn.softmax(att, axis=-1)
@@ -164,7 +220,7 @@ class CausalSelfAttention(nn.Module):
         if self.resid_pdrop > 0:
             y = nn.Dropout(rate=self.resid_pdrop)(y, deterministic=not training)
 
-        return y
+        return y, new_cache
 
 
 class MLP(nn.Module):
@@ -207,8 +263,10 @@ class Block(nn.Module):
     layer_idx: int = 0
 
     @nn.compact
-    def __call__(self, x: jax.Array, training: bool = True) -> jax.Array:
-        x = x + CausalSelfAttention(
+    def __call__(
+        self, x: jax.Array, training: bool = True, cache: KVCache | None = None
+    ) -> tuple[jax.Array, KVCache | None]:
+        attn_out, new_cache = CausalSelfAttention(
             n_embd=self.config.n_embd,
             n_head=self.config.n_head,
             block_size=self.config.block_size,
@@ -223,13 +281,14 @@ class Block(nn.Module):
             layer_idx=self.layer_idx,
             dtype=self.config.dtype,
             name="attn",
-        )(nn.LayerNorm(epsilon=self.config.layer_norm_epsilon, name="ln_1")(x), training)
+        )(nn.LayerNorm(epsilon=self.config.layer_norm_epsilon, name="ln_1")(x), training, cache)
+        x = x + attn_out
 
         x = x + MLP(self.config, name="mlp")(
             nn.LayerNorm(epsilon=self.config.layer_norm_epsilon, name="ln_2")(x), training
         )
 
-        return x
+        return x, new_cache
 
 
 class GPT(nn.Module):
@@ -239,18 +298,24 @@ class GPT(nn.Module):
 
     @nn.compact
     def __call__(
-        self, idx: jax.Array, targets: jax.Array | None = None, training: bool = True
-    ) -> tuple[jax.Array, jax.Array | None]:
+        self,
+        idx: jax.Array,
+        targets: jax.Array | None = None,
+        training: bool = True,
+        cache: list[KVCache] | None = None,
+    ) -> tuple[jax.Array, jax.Array | None, list[KVCache] | None]:
         """Forward pass.
 
         Args:
             idx: Input token indices (B, T)
             targets: Target token indices for loss computation (B, T)
             training: Whether in training mode
+            cache: Optional list of KVCache per layer for autoregressive generation
 
         Returns:
             logits: Model output logits (B, T, vocab_size)
             loss: Computed loss if targets provided, None otherwise
+            caches: Updated KV caches if cache input was provided, None otherwise
         """
         B, T = idx.shape
         assert T <= self.config.block_size, (
@@ -266,13 +331,14 @@ class GPT(nn.Module):
         )
         tok_emb = wte(idx)
 
+        pos_offset = cache[0].length if cache is not None else 0
         pos_emb = nn.Embed(
             num_embeddings=self.config.block_size,
             features=self.config.n_embd,
             embedding_init=nn.initializers.normal(stddev=self.config.initializer_range),
             dtype=getattr(jnp, self.config.dtype),
             name="wpe",
-        )(jnp.arange(T))
+        )(jnp.arange(T) + pos_offset)
 
         x = tok_emb + pos_emb
 
@@ -280,8 +346,14 @@ class GPT(nn.Module):
             x = nn.Dropout(rate=self.config.embd_pdrop)(x, deterministic=not training)
 
         block_cls = nn.remat(Block) if self.config.gradient_checkpointing else Block
+        new_caches: list[KVCache] = []
         for i in range(self.config.n_layer):
-            x = block_cls(self.config, layer_idx=i, name=f"h_{i}")(x, training)
+            layer_cache = cache[i] if cache is not None else None
+            x, new_cache = block_cls(self.config, layer_idx=i, name=f"h_{i}")(
+                x, training, layer_cache
+            )
+            if new_cache is not None:
+                new_caches.append(new_cache)
 
         x = nn.LayerNorm(epsilon=self.config.layer_norm_epsilon, name="ln_f")(x)
 
@@ -303,7 +375,7 @@ class GPT(nn.Module):
 
             loss = optax.softmax_cross_entropy_with_integer_labels(flat_logits, flat_targets).mean()
 
-        return logits, loss
+        return logits, loss, new_caches if cache is not None else None
 
     @classmethod
     def from_pretrained(cls, model_type: str, **kwargs: Any) -> "GPT":
@@ -396,6 +468,89 @@ def create_gpt_model(
     return GPT.from_pretrained(model_type, vocab_size=vocab_size, block_size=block_size, **kwargs)
 
 
+def _sample_top_p(logits: jax.Array, p: float) -> jax.Array:
+    """Mask logits outside the top-p nucleus, returning filtered logits."""
+    sorted_logits = jnp.sort(logits, axis=-1)[:, ::-1]
+    cumulative_probs = jnp.cumsum(jax.nn.softmax(sorted_logits, axis=-1), axis=-1)
+    sorted_mask = cumulative_probs > p
+    sorted_mask = jnp.roll(sorted_mask, 1, axis=-1)
+    sorted_mask = sorted_mask.at[:, 0].set(False)
+
+    rank = jnp.argsort(jnp.argsort(logits, axis=-1), axis=-1)
+    indices_to_remove = sorted_mask[jnp.arange(logits.shape[0])[:, None], rank]
+    return jnp.where(indices_to_remove, -float("inf"), logits)
+
+
+def generate(
+    model: GPT,
+    variables: Dict[str, Any],
+    idx: jax.Array,
+    max_new_tokens: int,
+    *,
+    temperature: float = 1.0,
+    top_k: int | None = None,
+    top_p: float | None = None,
+    rng: jax.Array | None = None,
+) -> jax.Array:
+    """Generate tokens autoregressively using KV-cache.
+
+    Args:
+        model: GPT model instance
+        variables: Model parameters (e.g. {"params": ...})
+        idx: Prompt token indices (B, T)
+        max_new_tokens: Number of tokens to generate
+        temperature: Sampling temperature (0 = greedy)
+        top_k: Top-k filtering
+        top_p: Top-p (nucleus) filtering
+        rng: PRNG key for sampling
+
+    Returns:
+        Full sequence including prompt and generated tokens (B, T + max_new_tokens)
+    """
+    if rng is None:
+        rng = random.PRNGKey(0)
+
+    B, T = idx.shape
+    config = model.config
+    head_dim = config.n_embd // config.n_head
+    cache_dtype = getattr(jnp, config.dtype)
+
+    caches = init_kv_cache(
+        B, config.n_layer, config.n_head, head_dim, config.block_size, cache_dtype
+    )
+
+    logits, _, caches = model.apply(variables, idx, training=False, cache=caches)  # type: ignore[misc]
+
+    next_logits = logits[:, -1, :]
+    generated = idx
+
+    for _ in range(max_new_tokens):
+        if temperature == 0.0:
+            next_token = jnp.argmax(next_logits, axis=-1)
+        else:
+            scaled_logits = next_logits / temperature
+
+            if top_k is not None:
+                top_k_vals, _ = jax.lax.top_k(scaled_logits, min(top_k, scaled_logits.shape[-1]))
+                threshold = top_k_vals[:, -1:]
+                scaled_logits = jnp.where(scaled_logits < threshold, -float("inf"), scaled_logits)
+
+            if top_p is not None:
+                scaled_logits = _sample_top_p(scaled_logits, top_p)
+
+            rng, sample_rng = random.split(rng)
+            next_token = random.categorical(sample_rng, scaled_logits, axis=-1)
+
+        generated = jnp.concatenate([generated, next_token[:, None]], axis=1)
+
+        logits, _, caches = model.apply(  # type: ignore[misc]
+            variables, next_token[:, None], training=False, cache=caches
+        )
+        next_logits = logits[:, -1, :]
+
+    return generated
+
+
 if __name__ == "__main__":
     model = create_gpt_model("gpt2", vocab_size=1000, block_size=512)
 
@@ -408,6 +563,6 @@ if __name__ == "__main__":
     print(f"Model parameters: {get_num_params(variables['params']):,}")
     print(f"Model size: {get_model_size_mb(variables['params']):.1f} MB")
 
-    logits, loss = model.apply(variables, x, targets=x)
+    logits, loss, _ = model.apply(variables, x, targets=x)  # type: ignore[misc]
     print(f"Output shape: {logits.shape}")
     print(f"Loss: {loss}")

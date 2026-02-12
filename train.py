@@ -232,7 +232,7 @@ def train_step(
     """Single training step with dropout RNG."""
 
     def loss_fn(params: dict) -> tuple[jax.Array, jax.Array]:
-        logits, loss = model.apply(
+        logits, loss, _ = model.apply(
             {"params": params}, x, targets=y, training=True, rngs={"dropout": rng}
         )
         return loss, logits  # type: ignore[return-value]
@@ -251,7 +251,7 @@ def accumulate_gradients(
     """Compute gradients for a single micro-batch (used in gradient accumulation)."""
 
     def loss_fn(params: dict) -> tuple[jax.Array, jax.Array]:
-        logits, loss = model.apply(
+        logits, loss, _ = model.apply(
             {"params": params}, x, targets=y, training=True, rngs={"dropout": rng}
         )
         return loss, logits  # type: ignore[return-value]
@@ -263,7 +263,7 @@ def accumulate_gradients(
 @jax.jit
 def eval_step(params: dict, x: jax.Array, y: jax.Array) -> jax.Array:
     """Single evaluation step."""
-    _logits, loss = model.apply({"params": params}, x, targets=y, training=False)
+    _logits, loss, _ = model.apply({"params": params}, x, targets=y, training=False)
     return loss  # type: ignore[return-value]
 
 

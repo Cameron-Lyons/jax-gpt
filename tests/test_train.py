@@ -42,7 +42,7 @@ class TestTrainStep:
         y = random.randint(rng, (2, 16), 0, 64)
 
         def loss_fn(params):
-            logits, loss = model.apply(
+            logits, loss, _ = model.apply(
                 {"params": params}, x, targets=y, training=True, rngs={"dropout": rng}
             )
             return loss, logits
@@ -72,7 +72,7 @@ class TestTrainStep:
             y = random.randint(batch_rng, (2, 16), 0, 64)
 
             def loss_fn(params):
-                logits, loss = model.apply(
+                logits, loss, _ = model.apply(
                     {"params": params},
                     x,
                     targets=y,
@@ -100,6 +100,6 @@ class TestEvalStep:
         x = random.randint(rng, (2, 16), 0, 64)
         y = random.randint(rng, (2, 16), 0, 64)
 
-        logits, loss = model.apply({"params": params}, x, targets=y, training=False)
+        logits, loss, _ = model.apply({"params": params}, x, targets=y, training=False)
         assert jnp.isfinite(loss)
         assert logits.shape == (2, 16, 64)

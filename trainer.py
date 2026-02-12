@@ -280,7 +280,7 @@ class ModernTrainer:
         x, y = batch
 
         def loss_fn(params: dict) -> Tuple[jax.Array, jax.Array]:
-            logits, loss = state.apply_fn(
+            logits, loss, _ = state.apply_fn(
                 {"params": params},
                 x,
                 targets=y,
@@ -311,7 +311,7 @@ class ModernTrainer:
     ) -> Dict[str, jax.Array]:
         x, y = batch
 
-        logits, loss = state.apply_fn({"params": state.params}, x, targets=y, training=False)
+        logits, loss, _ = state.apply_fn({"params": state.params}, x, targets=y, training=False)
 
         return {"loss": loss}
 

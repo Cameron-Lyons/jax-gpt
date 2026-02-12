@@ -53,11 +53,11 @@ class TestFunctionalToFlax:
         model = GPT(config)
         x = jnp.ones((1, 16), dtype=jnp.int32)
 
-        logits_orig, _ = model.apply({"params": flax_params}, x, training=False)
+        logits_orig, _, _ = model.apply({"params": flax_params}, x, training=False)
 
         functional = convert_flax_to_functional_params(flax_params, config)
         recovered = convert_functional_to_flax_params(functional, config)
-        logits_recovered, _ = model.apply({"params": recovered}, x, training=False)
+        logits_recovered, _, _ = model.apply({"params": recovered}, x, training=False)
 
         assert jnp.allclose(logits_orig, logits_recovered, atol=1e-5)
 

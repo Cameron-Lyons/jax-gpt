@@ -167,7 +167,7 @@ class BenchmarkRunner:
 
         def loss_fn(params, batch):
             x, y = batch
-            logits, loss = self.model.apply({"params": params}, x, targets=y, training=True)
+            logits, loss, _ = self.model.apply({"params": params}, x, targets=y, training=True)
             return loss, logits
 
         def train_step(params, opt_state, batch):

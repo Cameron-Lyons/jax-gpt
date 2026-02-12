@@ -156,7 +156,7 @@ def verify_parameter_conversion(
     functional_output = gpt2_fn(dummy_input, **functional_params, n_head=n_head)
 
     model = GPT(config)
-    flax_output, _ = model.apply({"params": flax_params}, dummy_input[None], training=False)
+    flax_output, _, _ = model.apply({"params": flax_params}, dummy_input[None], training=False)  # type: ignore[misc]
     flax_output = flax_output[0]
 
     diff = jnp.abs(functional_output - flax_output).max()

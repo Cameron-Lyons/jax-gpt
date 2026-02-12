@@ -37,7 +37,7 @@ class TestGPTForward:
         model = GPT(small_config)
         x = jnp.ones((2, small_config.block_size), dtype=jnp.int32)
         variables = model.init(rng, x)
-        logits, loss = model.apply(variables, x, training=False)
+        logits, loss, _ = model.apply(variables, x, training=False)
         assert logits.shape == (2, small_config.block_size, small_config.vocab_size)
         assert loss is None
 
@@ -45,7 +45,7 @@ class TestGPTForward:
         model = GPT(small_config)
         x = random.randint(rng, (2, small_config.block_size), 0, small_config.vocab_size)
         variables = model.init(rng, x)
-        logits, loss = model.apply(variables, x, targets=x, training=False)
+        logits, loss, _ = model.apply(variables, x, targets=x, training=False)
         assert logits.shape == (2, small_config.block_size, small_config.vocab_size)
         assert loss is not None
         assert loss.shape == ()
@@ -56,7 +56,7 @@ class TestGPTForward:
         model = GPT(config)
         x = jnp.ones((1, 8), dtype=jnp.int32)
         variables = model.init(rng, x)
-        logits, _ = model.apply(variables, x, training=False)
+        logits, _, _ = model.apply(variables, x, training=False)
         assert logits.shape == (1, 8, config.vocab_size)
 
     def test_untied_embeddings(self, small_config, rng):
@@ -64,7 +64,7 @@ class TestGPTForward:
         model = GPT(config)
         x = jnp.ones((1, 8), dtype=jnp.int32)
         variables = model.init(rng, x)
-        logits, _ = model.apply(variables, x, training=False)
+        logits, _, _ = model.apply(variables, x, training=False)
         assert logits.shape == (1, 8, config.vocab_size)
         assert "lm_head" in variables["params"]
 
@@ -84,7 +84,7 @@ class TestGPTForward:
             model = GPT(config)
             x = jnp.ones((1, 16), dtype=jnp.int32)
             variables = model.init(rng, x)
-            logits, _ = model.apply(variables, x, training=False)
+            logits, _, _ = model.apply(variables, x, training=False)
             assert logits.shape == (1, 16, 128)
 
 
@@ -110,8 +110,8 @@ class TestFlashAttention:
         x = jnp.ones((1, 16), dtype=jnp.int32)
         variables = model_manual.init(rng, x)
 
-        logits_manual, _ = model_manual.apply(variables, x, training=False)
-        logits_flash, _ = model_flash.apply(variables, x, training=False)
+        logits_manual, _, _ = model_manual.apply(variables, x, training=False)
+        logits_flash, _, _ = model_flash.apply(variables, x, training=False)
 
         assert jnp.allclose(logits_manual, logits_flash, atol=1e-4)
 
@@ -138,8 +138,8 @@ class TestGradientCheckpointing:
         x = jnp.ones((1, 16), dtype=jnp.int32)
         variables = model_base.init(rng, x)
 
-        logits_base, _ = model_base.apply(variables, x, training=False)
-        logits_ckpt, _ = model_ckpt.apply(variables, x, training=False)
+        logits_base, _, _ = model_base.apply(variables, x, training=False)
+        logits_ckpt, _, _ = model_ckpt.apply(variables, x, training=False)
 
         assert jnp.allclose(logits_base, logits_ckpt, atol=1e-5)
 
@@ -165,7 +165,7 @@ class TestGradientCheckpointing:
         variables = model_base.init(rng, x)
 
         def loss_fn(params, model):
-            logits, loss = model.apply({"params": params}, x, targets=x, training=False)
+            logits, loss, _ = model.apply({"params": params}, x, targets=x, training=False)
             return loss
 
         grads_base = jax.grad(loss_fn)(variables["params"], model_base)
@@ -199,8 +199,8 @@ class TestLayerScaling:
         x = jnp.ones((1, 16), dtype=jnp.int32)
         variables = model_no_scale.init(rng, x)
 
-        logits_no_scale, _ = model_no_scale.apply(variables, x, training=False)
-        logits_scale, _ = model_scale.apply(variables, x, training=False)
+        logits_no_scale, _, _ = model_no_scale.apply(variables, x, training=False)
+        logits_scale, _, _ = model_scale.apply(variables, x, training=False)
 
         assert not jnp.allclose(logits_no_scale, logits_scale, atol=1e-5)
 
@@ -222,7 +222,7 @@ class TestUpcastAttn:
         model = GPT(config)
         x = jnp.ones((1, 16), dtype=jnp.int32)
         variables = model.init(rng, x)
-        logits, _ = model.apply(variables, x, training=False)
+        logits, _, _ = model.apply(variables, x, training=False)
         assert logits.shape == (1, 16, 128)
 
 

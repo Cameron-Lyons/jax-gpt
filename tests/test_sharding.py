@@ -98,5 +98,5 @@ class TestWithModel:
         def forward(params, x):
             return model.apply({"params": params}, x, training=False)
 
-        logits, loss = forward(params, sx)
+        logits, loss, _ = forward(params, sx)
         assert logits.shape == (n_devices * 2, 16, 64)

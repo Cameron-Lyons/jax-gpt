@@ -5,11 +5,10 @@ Sample from a trained model.
 import os
 import pickle
 
-import jax
 import jax.numpy as jnp
 from jax import random
 
-from model import GPT, GPTConfig
+from model import GPT, GPTConfig, generate
 
 # -----------------------------------------------------------------------------
 init_from = "resume"  # either 'resume' (from an out_dir) or a gpt2 variant (e.g. 'gpt2-xl')
@@ -135,38 +134,16 @@ print("=" * 50)
 for k in range(num_samples):
     rng, sample_rng = random.split(rng)
 
-    # Generate tokens
-    generated = x
-    for _ in range(max_new_tokens):
-        # Crop to block size if needed
-        idx_cond = (
-            generated
-            if generated.shape[1] <= model_config.block_size
-            else generated[:, -model_config.block_size :]
-        )
+    generated = generate(
+        model,
+        variables,
+        x,
+        max_new_tokens,
+        temperature=temperature,
+        top_k=top_k,
+        rng=sample_rng,
+    )
 
-        # Forward pass
-        logits, _ = model.apply(variables, idx_cond, training=False)  # type: ignore[misc, assignment]
-
-        # Get logits for last position and apply temperature
-        logits = logits[:, -1, :] / temperature
-
-        # Apply top-k filtering
-        if top_k is not None:
-            top_k_logits, top_k_indices = jax.lax.top_k(logits, min(top_k, logits.shape[-1]))
-            # Zero out all logits not in top_k
-            mask = jnp.zeros_like(logits).at[0, top_k_indices[0]].set(1)
-            logits = jnp.where(mask == 1, logits, -float("inf"))
-
-        # Sample from the distribution
-        probs = jax.nn.softmax(logits, axis=-1)
-        sample_rng, cat_rng = random.split(sample_rng)
-        next_token = random.categorical(cat_rng, logits, axis=-1)
-
-        # Append to sequence
-        generated = jnp.concatenate([generated, next_token[:, None]], axis=1)
-
-    # Decode and print
     tokens = generated[0].tolist()
     text = decode(tokens)
     print(text)
