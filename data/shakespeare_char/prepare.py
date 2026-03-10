@@ -5,15 +5,27 @@ Will save train.bin, val.bin containing the ids, and meta.pkl containing the
 encoder and decoder and some other related info.
 """
 
+import importlib
 import os
 import pickle
+from typing import Any
 
 import numpy as np
-import requests
+
+
+def _load_data_dependency(module_name: str) -> Any:
+    try:
+        return importlib.import_module(module_name)
+    except ImportError as exc:
+        raise ImportError(
+            "Shakespeare char data prep requires the 'data' extra: pip install -e '.[data]'"
+        ) from exc
+
 
 # download the tiny shakespeare dataset
 input_file_path = os.path.join(os.path.dirname(__file__), "input.txt")
 if not os.path.exists(input_file_path):
+    requests = _load_data_dependency("requests")
     data_url = (
         "https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt"
     )

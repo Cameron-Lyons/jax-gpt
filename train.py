@@ -1,370 +1,550 @@
-"""
-Training script for GPT-2 models in JAX.
+"""Training script for GPT-style language models in JAX."""
 
-To run on a single GPU:
-$ python train.py config/train_shakespeare_char.py
+from __future__ import annotations
 
-To override config values:
-$ python train.py config/train_shakespeare_char.py --batch_size=32
-"""
-
-import os
+import importlib
 import pickle
 import time
+from dataclasses import asdict, dataclass, replace
+from pathlib import Path
+from typing import Any, cast
 
 import jax
 import jax.numpy as jnp
 import numpy as np
 import optax
-import orbax.checkpoint as ocp
 from jax import random
 
-from model import GPT, GPTConfig
-
-# -----------------------------------------------------------------------------
-# default config values designed to train a gpt2 (124M) on OpenWebText
-# I/O
-out_dir = "out"
-eval_interval = 2000
-log_interval = 1
-eval_iters = 200
-eval_only = False
-always_save_checkpoint = True
-init_from = "scratch"  # 'scratch' or 'resume' or 'gpt2*'
-# wandb logging
-wandb_log = False
-wandb_project = "jax-gpt"
-wandb_run_name = "gpt2"
-# data
-dataset = "openwebtext"
-gradient_accumulation_steps = 5 * 8
-batch_size = 12
-block_size = 1024
-# model
-n_layer = 12
-n_head = 12
-n_embd = 768
-dropout = 0.0
-bias = True
-# adamw optimizer
-learning_rate = 6e-4
-max_iters = 600000
-weight_decay = 1e-1
-beta1 = 0.9
-beta2 = 0.95
-grad_clip = 1.0
-# learning rate decay settings
-decay_lr = True
-warmup_iters = 2000
-lr_decay_iters = 600000
-min_lr = 6e-5
-# system
-device = "gpu"
-dtype = "bfloat16"
-compile = True
-seed = 1337
-# -----------------------------------------------------------------------------
-config_keys = [
-    k
-    for k, v in globals().items()
-    if not k.startswith("_") and isinstance(v, (int, float, bool, str))
-]
-exec(open("configurator.py").read())  # noqa: S102
-config = {k: globals()[k] for k in config_keys}
-# -----------------------------------------------------------------------------
-
-master_rng = random.PRNGKey(seed)
-
-if wandb_log:
-    import wandb
-
-    wandb.init(project=wandb_project, name=wandb_run_name, config=config)
-
-data_dir = os.path.join("data", dataset)
-
-
-def get_batch(split: str, rng: jax.Array) -> tuple[jax.Array, jax.Array]:
-    """Load a batch from memory-mapped data."""
-    if split == "train":
-        data = np.memmap(os.path.join(data_dir, "train.bin"), dtype=np.uint16, mode="r")
-    else:
-        data = np.memmap(os.path.join(data_dir, "val.bin"), dtype=np.uint16, mode="r")
-
-    ix = random.randint(rng, (batch_size,), 0, len(data) - block_size)
-    ix = np.array(ix)  # type: ignore[assignment]
-
-    x = jnp.stack([jnp.array(data[i : i + block_size].astype(np.int32)) for i in ix])
-    y = jnp.stack([jnp.array(data[i + 1 : i + 1 + block_size].astype(np.int32)) for i in ix])
-
-    return x, y
-
-
-# init these up here, can override if init_from='resume'
-iter_num = 0
-best_val_loss = 1e9
-
-meta_path = os.path.join(data_dir, "meta.pkl")
-meta_vocab_size = None
-if os.path.exists(meta_path):
-    with open(meta_path, "rb") as f:
-        meta = pickle.load(f)  # noqa: S301
-    meta_vocab_size = meta["vocab_size"]
-    print(f"found vocab_size = {meta_vocab_size} (inside {meta_path})")
-
-model_args: dict = dict(
-    n_layer=n_layer,
-    n_head=n_head,
-    n_embd=n_embd,
-    block_size=block_size,
-    bias=bias,
-    vocab_size=None,
-    embd_pdrop=dropout,
-    resid_pdrop=dropout,
-    attn_pdrop=dropout,
+from configurator import TrainConfig, parse_train_config
+from model import GPT, GPTConfig, configure_optimizers
+from parameter_converter import convert_functional_to_flax_params
+from utils import (
+    DEFAULT_PADDED_VOCAB_SIZE,
+    get_gpt2_model_size,
+    load_encoder_hparams_and_params,
+    load_training_checkpoint,
+    resolve_jax_device,
+    sample_language_model_batch,
+    save_training_checkpoint,
 )
 
-if init_from == "scratch":
-    print("Initializing a new model from scratch")
-    if meta_vocab_size is None:
-        print("defaulting to vocab_size of GPT-2 to 50304 (50257 rounded up for efficiency)")
-    model_args["vocab_size"] = meta_vocab_size if meta_vocab_size is not None else 50304
+CHECKPOINT_FILENAME = "ckpt.pkl"
 
-    gptconf = GPTConfig(**model_args)
-    model = GPT(gptconf)
 
-    master_rng, init_rng = random.split(master_rng)
-    dummy_input = jnp.ones((batch_size, block_size), dtype=jnp.int32)
-    variables = model.init(init_rng, dummy_input, training=False)
-    params = variables["params"]
+@dataclass
+class TokenDataset:
+    """Memory-mapped train/validation token arrays plus optional metadata."""
 
-elif init_from == "resume":
-    print(f"Resuming training from {out_dir}")
-    ckpt_path = os.path.join(out_dir, "ckpt.pkl")
-    with open(ckpt_path, "rb") as f:
-        checkpoint = pickle.load(f)  # noqa: S301
-    checkpoint_model_args = checkpoint["model_args"]
-    for k in ["n_layer", "n_head", "n_embd", "block_size", "bias", "vocab_size"]:
-        model_args[k] = checkpoint_model_args[k]
-    gptconf = GPTConfig(**model_args)
-    model = GPT(gptconf)
-    params = checkpoint["params"]
-    iter_num = checkpoint["iter_num"]
-    best_val_loss = checkpoint["best_val_loss"]
+    train_tokens: np.memmap
+    val_tokens: np.memmap
+    meta: dict[str, Any] | None
+    dataset_dir: Path
 
-elif init_from.startswith("gpt2"):
-    print(f"Initializing from OpenAI GPT-2 weights: {init_from}")
-    from parameter_converter import convert_functional_to_flax_params
-    from utils import load_encoder_hparams_and_params
 
-    model_size_map = {
-        "gpt2": "124M",
-        "gpt2-medium": "355M",
-        "gpt2-large": "774M",
-        "gpt2-xl": "1558M",
+@dataclass
+class TrainingArtifacts:
+    """Mutable state for an in-progress training run."""
+
+    model: GPT
+    model_config: GPTConfig
+    params: Any
+    opt_state: optax.OptState
+    iter_num: int
+    best_val_loss: float
+    rng: jax.Array
+
+
+def checkpoint_path(out_dir: str | Path) -> Path:
+    """Return the canonical checkpoint path for an output directory."""
+    return Path(out_dir) / CHECKPOINT_FILENAME
+
+
+def _load_meta(meta_path: Path) -> dict[str, Any] | None:
+    if not meta_path.exists():
+        return None
+    with meta_path.open("rb") as handle:
+        meta = pickle.load(handle)  # noqa: S301
+    if not isinstance(meta, dict):
+        raise TypeError(f"Expected metadata dictionary in {meta_path}")
+    return meta
+
+
+def prepare_resume_config(config: TrainConfig) -> tuple[TrainConfig, dict[str, Any] | None]:
+    """Hydrate resume config values from checkpoint metadata when available."""
+    if config.init_from != "resume":
+        return config, None
+
+    checkpoint = load_training_checkpoint(checkpoint_path(config.out_dir))
+    updates: dict[str, Any] = {}
+    if isinstance(checkpoint.get("dataset"), str):
+        updates["dataset"] = checkpoint["dataset"]
+    if isinstance(checkpoint.get("data_dir"), str):
+        updates["data_dir"] = checkpoint["data_dir"]
+    if updates:
+        config = replace(config, **updates)
+    return config, checkpoint
+
+
+def load_token_dataset(config: TrainConfig) -> TokenDataset:
+    """Open dataset memmaps once and keep them alive for the full training run."""
+    dataset_dir = Path(config.data_dir) / config.dataset
+    train_path = dataset_dir / "train.bin"
+    val_path = dataset_dir / "val.bin"
+
+    if not train_path.exists():
+        raise FileNotFoundError(f"Training data not found: {train_path}")
+    if not val_path.exists():
+        raise FileNotFoundError(f"Validation data not found: {val_path}")
+
+    return TokenDataset(
+        train_tokens=np.memmap(train_path, dtype=np.uint16, mode="r"),
+        val_tokens=np.memmap(val_path, dtype=np.uint16, mode="r"),
+        meta=_load_meta(dataset_dir / "meta.pkl"),
+        dataset_dir=dataset_dir,
+    )
+
+
+def get_batch(
+    tokens: np.memmap,
+    *,
+    batch_size: int,
+    block_size: int,
+    rng: jax.Array,
+) -> tuple[jax.Array, jax.Array]:
+    """Sample a batch from a token memmap."""
+    return sample_language_model_batch(
+        tokens,
+        batch_size=batch_size,
+        block_size=block_size,
+        rng=rng,
+    )
+
+
+def create_lr_schedule(config: TrainConfig) -> optax.Schedule:
+    """Build the training learning-rate schedule."""
+    if not config.decay_lr:
+        return optax.constant_schedule(config.learning_rate)
+
+    if config.warmup_iters > 0:
+        warmup = optax.linear_schedule(
+            init_value=0.0,
+            end_value=config.learning_rate,
+            transition_steps=max(config.warmup_iters, 1),
+        )
+        decay = optax.cosine_decay_schedule(
+            init_value=config.learning_rate,
+            decay_steps=max(config.lr_decay_iters - config.warmup_iters, 1),
+            alpha=config.min_lr / config.learning_rate,
+        )
+        return optax.join_schedules([warmup, decay], boundaries=[config.warmup_iters])
+
+    return optax.cosine_decay_schedule(
+        init_value=config.learning_rate,
+        decay_steps=max(config.lr_decay_iters, 1),
+        alpha=config.min_lr / config.learning_rate,
+    )
+
+
+def build_model_config(
+    config: TrainConfig,
+    *,
+    vocab_size: int,
+    n_layer: int | None = None,
+    n_head: int | None = None,
+    n_embd: int | None = None,
+    block_size: int | None = None,
+    bias: bool | None = None,
+) -> GPTConfig:
+    """Build a `GPTConfig` from a training config plus optional overrides."""
+    return GPTConfig(
+        n_layer=config.n_layer if n_layer is None else n_layer,
+        n_head=config.n_head if n_head is None else n_head,
+        n_embd=config.n_embd if n_embd is None else n_embd,
+        vocab_size=vocab_size,
+        block_size=config.block_size if block_size is None else block_size,
+        embd_pdrop=config.dropout,
+        resid_pdrop=config.dropout,
+        attn_pdrop=config.dropout,
+        bias=config.bias if bias is None else bias,
+        dtype=config.dtype,
+    )
+
+
+def model_config_from_checkpoint(checkpoint: dict[str, Any]) -> GPTConfig:
+    """Rebuild a model config from current or legacy checkpoint formats."""
+    raw_values = (
+        checkpoint.get("model_config") or checkpoint.get("model_args") or checkpoint.get("config")
+    )
+    if not isinstance(raw_values, dict):
+        raise ValueError("Checkpoint does not contain model configuration")
+
+    model_values = {
+        key: value for key, value in raw_values.items() if key in GPTConfig.__dataclass_fields__
     }
-    model_size = model_size_map.get(init_from, "124M")
-
-    encoder, hparams, pretrained_params = load_encoder_hparams_and_params(model_size, "models")  # type: ignore[arg-type]
-
-    model_args["n_layer"] = hparams["n_layer"]
-    model_args["n_head"] = hparams["n_head"]
-    model_args["n_embd"] = hparams["n_embd"]
-    model_args["block_size"] = hparams["n_ctx"]
-    model_args["vocab_size"] = hparams["n_vocab"]
-    model_args["bias"] = True
-
-    gptconf = GPTConfig(**model_args)
-    model = GPT(gptconf)
-
-    params = convert_functional_to_flax_params(pretrained_params, gptconf)
-
-else:
-    raise ValueError(f"Unknown init_from: {init_from}")
-
-print(f"Model config: {gptconf}")
-
-# Learning rate schedule
-lr_schedule = (
-    optax.join_schedules(
-        schedules=[
-            optax.linear_schedule(0.0, learning_rate, warmup_iters),
-            optax.cosine_decay_schedule(
-                learning_rate, lr_decay_iters - warmup_iters, min_lr / learning_rate
-            ),
-        ],
-        boundaries=[warmup_iters],
-    )
-    if decay_lr
-    else optax.constant_schedule(learning_rate)
-)
+    if "dropout" in raw_values:
+        model_values.setdefault("embd_pdrop", raw_values["dropout"])
+        model_values.setdefault("resid_pdrop", raw_values["dropout"])
+        model_values.setdefault("attn_pdrop", raw_values["dropout"])
+    return GPTConfig(**model_values)
 
 
-def create_optimizer(
-    learning_rate_fn: optax.Schedule,
-) -> optax.GradientTransformation:
-    """Create AdamW optimizer with learning rate schedule."""
-    return optax.chain(
-        optax.clip_by_global_norm(grad_clip) if grad_clip > 0.0 else optax.identity(),
-        optax.adamw(
-            learning_rate=learning_rate_fn,
-            b1=beta1,
-            b2=beta2,
-            weight_decay=weight_decay,
-        ),
-    )
+def create_step_functions(
+    model: GPT,
+    optimizer: optax.GradientTransformation,
+    *,
+    compile_enabled: bool,
+) -> tuple[Any, Any, Any]:
+    """Create train and eval step functions, optionally JIT compiling them."""
 
+    def loss_and_grads(
+        params: Any,
+        x: jax.Array,
+        y: jax.Array,
+        rng: jax.Array,
+    ) -> tuple[jax.Array, Any]:
+        def loss_fn(model_params: Any) -> tuple[jax.Array, jax.Array]:
+            logits, loss, _ = cast(
+                tuple[jax.Array, jax.Array, Any],
+                model.apply(
+                    {"params": model_params},
+                    x,
+                    targets=y,
+                    training=True,
+                    rngs={"dropout": rng},
+                ),
+            )
+            return loss, logits
 
-optimizer = create_optimizer(lr_schedule)
-opt_state = optimizer.init(params)
+        (loss, _logits), grads = jax.value_and_grad(loss_fn, has_aux=True)(params)
+        return loss, grads
 
-# Orbax checkpoint manager
-os.makedirs(out_dir, exist_ok=True)
-ckpt_mgr = ocp.CheckpointManager(
-    out_dir,
-    options=ocp.CheckpointManagerOptions(max_to_keep=3, create=True),
-)
+    def train_step(
+        params: Any,
+        opt_state: optax.OptState,
+        x: jax.Array,
+        y: jax.Array,
+        rng: jax.Array,
+    ) -> tuple[Any, optax.OptState, jax.Array]:
+        loss, grads = loss_and_grads(params, x, y, rng)
+        updates, next_opt_state = optimizer.update(grads, opt_state, params)
+        next_params = optax.apply_updates(params, updates)
+        return next_params, next_opt_state, loss
 
+    def accumulate_gradients(
+        params: Any,
+        x: jax.Array,
+        y: jax.Array,
+        rng: jax.Array,
+    ) -> tuple[jax.Array, Any]:
+        return loss_and_grads(params, x, y, rng)
 
-@jax.jit
-def train_step(
-    params: dict, opt_state: optax.OptState, x: jax.Array, y: jax.Array, rng: jax.Array
-) -> tuple[dict, optax.OptState, jax.Array]:
-    """Single training step with dropout RNG."""
-
-    def loss_fn(params: dict) -> tuple[jax.Array, jax.Array]:
-        logits, loss, _ = model.apply(
-            {"params": params}, x, targets=y, training=True, rngs={"dropout": rng}
+    def eval_step(params: Any, x: jax.Array, y: jax.Array) -> jax.Array:
+        _logits, loss, _ = cast(
+            tuple[jax.Array, jax.Array, Any],
+            model.apply({"params": params}, x, targets=y, training=False),
         )
-        return loss, logits  # type: ignore[return-value]
+        return loss
 
-    (loss, _logits), grads = jax.value_and_grad(loss_fn, has_aux=True)(params)
-    updates, new_opt_state = optimizer.update(grads, opt_state, params)
-    new_params = optax.apply_updates(params, updates)
-
-    return new_params, new_opt_state, loss
+    if not compile_enabled:
+        return train_step, accumulate_gradients, eval_step
+    return jax.jit(train_step), jax.jit(accumulate_gradients), jax.jit(eval_step)
 
 
-@jax.jit
-def accumulate_gradients(
-    params: dict, x: jax.Array, y: jax.Array, rng: jax.Array
-) -> tuple[jax.Array, dict]:
-    """Compute gradients for a single micro-batch (used in gradient accumulation)."""
-
-    def loss_fn(params: dict) -> tuple[jax.Array, jax.Array]:
-        logits, loss, _ = model.apply(
-            {"params": params}, x, targets=y, training=True, rngs={"dropout": rng}
-        )
-        return loss, logits  # type: ignore[return-value]
-
-    (loss, _logits), grads = jax.value_and_grad(loss_fn, has_aux=True)(params)
-    return loss, grads
-
-
-@jax.jit
-def eval_step(params: dict, x: jax.Array, y: jax.Array) -> jax.Array:
-    """Single evaluation step."""
-    _logits, loss, _ = model.apply({"params": params}, x, targets=y, training=False)
-    return loss  # type: ignore[return-value]
-
-
-def estimate_loss(params: dict, rng: jax.Array) -> dict[str, float]:
-    """Estimate loss on train and validation sets."""
-    out: dict[str, float] = {}
-    for split in ["train", "val"]:
-        losses = []
-        for _k in range(eval_iters):
+def estimate_loss(
+    *,
+    params: Any,
+    dataset: TokenDataset,
+    batch_size: int,
+    block_size: int,
+    eval_iters: int,
+    eval_step: Any,
+    rng: jax.Array,
+) -> tuple[dict[str, float], jax.Array]:
+    """Estimate train/validation loss using fresh batches each time."""
+    losses: dict[str, float] = {}
+    for split_name, tokens in (("train", dataset.train_tokens), ("val", dataset.val_tokens)):
+        split_losses: list[float] = []
+        for _ in range(eval_iters):
             rng, batch_rng = random.split(rng)
-            X, Y = get_batch(split, batch_rng)
-            loss = eval_step(params, X, Y)
-            losses.append(float(loss))
-        out[split] = float(np.mean(losses))
-    return out
+            x, y = get_batch(
+                tokens,
+                batch_size=batch_size,
+                block_size=block_size,
+                rng=batch_rng,
+            )
+            split_losses.append(float(eval_step(params, x, y)))
+        losses[split_name] = float(np.mean(split_losses))
+    return losses, rng
 
 
-# training loop
-print(f"Starting training from iteration {iter_num}")
-print(
-    f"Training config: batch_size={batch_size}, block_size={block_size}, "
-    f"n_layer={n_layer}, n_head={n_head}, n_embd={n_embd}"
-)
-print(f"Learning rate: {learning_rate}, weight_decay={weight_decay}, warmup_iters={warmup_iters}")
+def initialize_training(
+    config: TrainConfig,
+    dataset: TokenDataset,
+    optimizer: optax.GradientTransformation,
+    *,
+    resume_checkpoint: dict[str, Any] | None = None,
+) -> TrainingArtifacts:
+    """Initialize a model, params, optimizer state, and RNG."""
+    run_rng = random.PRNGKey(config.seed)
 
-t0 = time.time()
-local_iter_num = 0
+    if config.init_from == "resume":
+        checkpoint = resume_checkpoint or load_training_checkpoint(checkpoint_path(config.out_dir))
+        model_config = model_config_from_checkpoint(checkpoint)
+        model = GPT(model_config)
+        params = checkpoint["params"]
+        opt_state = checkpoint.get("opt_state") or checkpoint.get("optimizer_state")
+        if opt_state is None:
+            print("Checkpoint has no optimizer state; starting optimizer from scratch.")
+            opt_state = optimizer.init(params)
+        run_rng = checkpoint.get("rng", run_rng)
+        return TrainingArtifacts(
+            model=model,
+            model_config=model_config,
+            params=params,
+            opt_state=opt_state,
+            iter_num=int(checkpoint.get("iter_num", checkpoint.get("step", 0))),
+            best_val_loss=float(checkpoint.get("best_val_loss", float("inf"))),
+            rng=run_rng,
+        )
 
-while True:
-    lr = float(lr_schedule(iter_num))
+    if config.init_from == "scratch":
+        vocab_size = dataset.meta.get("vocab_size") if dataset.meta is not None else None
+        if vocab_size is None:
+            print(
+                "No vocab_size found in dataset metadata; "
+                "defaulting to GPT-2 padded vocab size 50304."
+            )
+        model_config = build_model_config(
+            config, vocab_size=int(vocab_size or DEFAULT_PADDED_VOCAB_SIZE)
+        )
+        model = GPT(model_config)
+        run_rng, init_rng = random.split(run_rng)
+        dummy_input = jnp.ones((config.batch_size, model_config.block_size), dtype=jnp.int32)
+        params = model.init(init_rng, dummy_input, training=False)["params"]
+        return TrainingArtifacts(
+            model=model,
+            model_config=model_config,
+            params=params,
+            opt_state=optimizer.init(params),
+            iter_num=0,
+            best_val_loss=float("inf"),
+            rng=run_rng,
+        )
 
-    if iter_num % eval_interval == 0:
-        losses = estimate_loss(params, master_rng)
-        print(f"step {iter_num}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}")
+    if config.init_from.startswith("gpt2"):
+        model_size = get_gpt2_model_size(config.init_from)
+        _encoder, hparams, pretrained_params = load_encoder_hparams_and_params(
+            model_size,
+            config.models_dir,
+        )
+        model_config = build_model_config(
+            config,
+            vocab_size=int(hparams["n_vocab"]),
+            n_layer=int(hparams["n_layer"]),
+            n_head=int(hparams["n_head"]),
+            n_embd=int(hparams["n_embd"]),
+            block_size=int(hparams["n_ctx"]),
+            bias=True,
+        )
+        model = GPT(model_config)
+        params = convert_functional_to_flax_params(pretrained_params, model_config)
+        return TrainingArtifacts(
+            model=model,
+            model_config=model_config,
+            params=params,
+            opt_state=optimizer.init(params),
+            iter_num=0,
+            best_val_loss=float("inf"),
+            rng=run_rng,
+        )
 
-        if wandb_log:
-            wandb.log(
-                {
-                    "iter": iter_num,
-                    "train/loss": losses["train"],
-                    "val/loss": losses["val"],
-                    "lr": lr,
-                }
+    raise ValueError(f"Unknown init_from value: {config.init_from}")
+
+
+def save_checkpoint_state(config: TrainConfig, artifacts: TrainingArtifacts) -> Path:
+    """Persist the latest training state to disk."""
+    path = checkpoint_path(config.out_dir)
+    payload = {
+        "version": 2,
+        "params": artifacts.params,
+        "opt_state": artifacts.opt_state,
+        "iter_num": artifacts.iter_num,
+        "best_val_loss": artifacts.best_val_loss,
+        "model_config": asdict(artifacts.model_config),
+        "model_args": asdict(artifacts.model_config),
+        "train_config": config.to_dict(),
+        "config": config.to_dict(),
+        "dataset": config.dataset,
+        "data_dir": config.data_dir,
+        "rng": artifacts.rng,
+    }
+    print(f"Saving checkpoint to {path}")
+    return save_training_checkpoint(payload, path)
+
+
+def train(config: TrainConfig) -> dict[str, Any]:
+    """Run training and return a small summary payload."""
+    if config.gradient_accumulation_steps < 1:
+        raise ValueError("gradient_accumulation_steps must be at least 1")
+
+    config, resume_checkpoint = prepare_resume_config(config)
+    dataset = load_token_dataset(config)
+    device = resolve_jax_device(config.device)
+
+    with jax.default_device(device):
+        lr_schedule = create_lr_schedule(config)
+        optimizer = configure_optimizers(
+            {},
+            learning_rate=lr_schedule,
+            weight_decay=config.weight_decay,
+            betas=(config.beta1, config.beta2),
+            grad_clip=config.grad_clip,
+        )
+        artifacts = initialize_training(
+            config,
+            dataset,
+            optimizer,
+            resume_checkpoint=resume_checkpoint,
+        )
+        train_step, accumulate_gradients, eval_step = create_step_functions(
+            artifacts.model,
+            optimizer,
+            compile_enabled=config.compile,
+        )
+
+        wandb_module: Any | None = None
+        if config.wandb_log:
+            wandb_module = importlib.import_module("wandb")
+            wandb_module.init(
+                project=config.wandb_project,
+                name=config.wandb_run_name,
+                config=config.to_dict(),
             )
 
-        if losses["val"] < best_val_loss or always_save_checkpoint:
-            best_val_loss = losses["val"]
-            if iter_num > 0:
-                checkpoint = {
-                    "params": params,
-                    "model_args": model_args,
-                    "iter_num": iter_num,
-                    "best_val_loss": best_val_loss,
-                    "config": config,
-                    "dataset": dataset,
-                }
-                print(f"saving checkpoint to {out_dir}")
-                with open(os.path.join(out_dir, "ckpt.pkl"), "wb") as f:  # type: ignore[assignment]
-                    pickle.dump(checkpoint, f)
+        print(f"Using device: {device}")
+        print(f"Loading dataset from: {dataset.dataset_dir}")
+        print(f"Model config: {artifacts.model_config}")
+        print(f"Starting training from iteration {artifacts.iter_num}")
 
-    if iter_num == 0 and eval_only:
-        break
+        t0 = time.time()
+        last_checkpoint_iter = -1
+        while artifacts.iter_num < config.max_iters:
+            current_lr = float(lr_schedule(artifacts.iter_num))
 
-    # Gradient accumulation: accumulate grads across micro-batches, then apply once
-    if gradient_accumulation_steps == 1:
-        master_rng, batch_rng, step_rng = random.split(master_rng, 3)
-        X, Y = get_batch("train", batch_rng)
-        params, opt_state, loss = train_step(params, opt_state, X, Y, step_rng)
-    else:
-        total_loss = 0.0
-        accumulated_grads = None
-        for micro_step in range(gradient_accumulation_steps):
-            master_rng, batch_rng, step_rng = random.split(master_rng, 3)
-            X, Y = get_batch("train", batch_rng)
-            micro_loss, micro_grads = accumulate_gradients(params, X, Y, step_rng)
-            total_loss += float(micro_loss)
-            if accumulated_grads is None:
-                accumulated_grads = micro_grads
+            if artifacts.iter_num % config.eval_interval == 0:
+                losses, artifacts.rng = estimate_loss(
+                    params=artifacts.params,
+                    dataset=dataset,
+                    batch_size=config.batch_size,
+                    block_size=artifacts.model_config.block_size,
+                    eval_iters=config.eval_iters,
+                    eval_step=eval_step,
+                    rng=artifacts.rng,
+                )
+                print(
+                    f"step {artifacts.iter_num}: "
+                    f"train loss {losses['train']:.4f}, val loss {losses['val']:.4f}"
+                )
+
+                if wandb_module is not None:
+                    wandb_module.log(
+                        {
+                            "iter": artifacts.iter_num,
+                            "train/loss": losses["train"],
+                            "val/loss": losses["val"],
+                            "lr": current_lr,
+                        }
+                    )
+
+                if losses["val"] < artifacts.best_val_loss:
+                    artifacts.best_val_loss = losses["val"]
+                if (losses["val"] <= artifacts.best_val_loss or config.always_save_checkpoint) and (
+                    artifacts.iter_num > 0
+                ):
+                    save_checkpoint_state(config, artifacts)
+                    last_checkpoint_iter = artifacts.iter_num
+
+                if config.eval_only:
+                    break
+
+            if config.gradient_accumulation_steps == 1:
+                artifacts.rng, batch_rng, step_rng = random.split(artifacts.rng, 3)
+                x, y = get_batch(
+                    dataset.train_tokens,
+                    batch_size=config.batch_size,
+                    block_size=artifacts.model_config.block_size,
+                    rng=batch_rng,
+                )
+                artifacts.params, artifacts.opt_state, loss = train_step(
+                    artifacts.params,
+                    artifacts.opt_state,
+                    x,
+                    y,
+                    step_rng,
+                )
             else:
-                accumulated_grads = jax.tree.map(lambda a, b: a + b, accumulated_grads, micro_grads)
+                total_loss = 0.0
+                accumulated_grads: Any | None = None
+                for _ in range(config.gradient_accumulation_steps):
+                    artifacts.rng, batch_rng, step_rng = random.split(artifacts.rng, 3)
+                    x, y = get_batch(
+                        dataset.train_tokens,
+                        batch_size=config.batch_size,
+                        block_size=artifacts.model_config.block_size,
+                        rng=batch_rng,
+                    )
+                    micro_loss, micro_grads = accumulate_gradients(artifacts.params, x, y, step_rng)
+                    total_loss += float(micro_loss)
+                    if accumulated_grads is None:
+                        accumulated_grads = micro_grads
+                    else:
+                        accumulated_grads = jax.tree_util.tree_map(
+                            lambda left, right: left + right,
+                            accumulated_grads,
+                            micro_grads,
+                        )
 
-        accumulated_grads = jax.tree.map(
-            lambda g: g / gradient_accumulation_steps, accumulated_grads
-        )
-        updates, opt_state = optimizer.update(accumulated_grads, opt_state, params)
-        params = optax.apply_updates(params, updates)
-        loss = total_loss / gradient_accumulation_steps
+                assert accumulated_grads is not None
+                averaged_grads = jax.tree_util.tree_map(
+                    lambda value: value / config.gradient_accumulation_steps,
+                    accumulated_grads,
+                )
+                updates, artifacts.opt_state = optimizer.update(
+                    averaged_grads,
+                    artifacts.opt_state,
+                    artifacts.params,
+                )
+                artifacts.params = optax.apply_updates(artifacts.params, updates)
+                loss = total_loss / config.gradient_accumulation_steps
 
-    # timing and logging
-    t1 = time.time()
-    dt = t1 - t0
-    t0 = t1
+            t1 = time.time()
+            dt = t1 - t0
+            t0 = t1
 
-    if iter_num % log_interval == 0:
-        lossf = float(loss)
-        print(f"iter {iter_num}: loss {lossf:.4f}, time {dt * 1000:.2f}ms, lr {lr:.2e}")
+            if artifacts.iter_num % config.log_interval == 0:
+                print(
+                    f"iter {artifacts.iter_num}: "
+                    f"loss {float(loss):.4f}, time {dt * 1000:.2f}ms, lr {current_lr:.2e}"
+                )
 
-    iter_num += 1
-    local_iter_num += 1
+            artifacts.iter_num += 1
 
-    if iter_num > max_iters:
-        break
+        if artifacts.iter_num > 0 and last_checkpoint_iter != artifacts.iter_num:
+            save_checkpoint_state(config, artifacts)
 
-print("Training complete!")
+    print("Training complete!")
+    return {
+        "checkpoint_path": str(checkpoint_path(config.out_dir)),
+        "iter_num": artifacts.iter_num,
+        "best_val_loss": artifacts.best_val_loss,
+        "model_config": asdict(artifacts.model_config),
+    }
+
+
+def main(argv: list[str] | None = None) -> dict[str, Any]:
+    """CLI entry point for training."""
+    return train(parse_train_config(argv))
+
+
+if __name__ == "__main__":
+    main()

@@ -4,15 +4,26 @@ Unlike shakespeare_char which is character-level, this uses GPT-2 BPE tokenizati
 This is suitable for fine-tuning pretrained GPT-2 models.
 """
 
+import importlib
 import os
+from typing import Any
 
 import numpy as np
-import requests
-import tiktoken
+
+
+def _load_data_dependency(module_name: str) -> Any:
+    try:
+        return importlib.import_module(module_name)
+    except ImportError as exc:
+        raise ImportError(
+            "Shakespeare data prep requires the 'data' extra: pip install -e '.[data]'"
+        ) from exc
+
 
 # download the tiny shakespeare dataset
 input_file_path = os.path.join(os.path.dirname(__file__), "input.txt")
 if not os.path.exists(input_file_path):
+    requests = _load_data_dependency("requests")
     data_url = (
         "https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt"
     )
@@ -26,6 +37,7 @@ train_data = data[: int(n * 0.9)]
 val_data = data[int(n * 0.9) :]
 
 # encode with tiktoken gpt2 bpe
+tiktoken = _load_data_dependency("tiktoken")
 enc = tiktoken.get_encoding("gpt2")
 train_ids = enc.encode_ordinary(train_data)
 val_ids = enc.encode_ordinary(val_data)

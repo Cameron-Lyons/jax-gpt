@@ -1,150 +1,144 @@
-"""
-Sample from a trained model.
-"""
+"""Sample text from a trained or pretrained GPT model."""
 
-import os
+from __future__ import annotations
+
 import pickle
+from pathlib import Path
+from typing import Any
 
+import jax
 import jax.numpy as jnp
 from jax import random
 
+from configurator import SampleConfig, parse_sample_config
 from model import GPT, GPTConfig, generate
+from parameter_converter import convert_functional_to_flax_params
+from train import checkpoint_path, model_config_from_checkpoint
+from utils import (
+    TiktokenEncoder,
+    get_gpt2_model_size,
+    load_encoder_hparams_and_params,
+    load_training_checkpoint,
+    resolve_jax_device,
+)
 
-# -----------------------------------------------------------------------------
-init_from = "resume"  # either 'resume' (from an out_dir) or a gpt2 variant (e.g. 'gpt2-xl')
-out_dir = "out"  # ignored if init_from is not 'resume'
-start = "\n"  # or "<|endoftext|>" or etc. Can also specify a file, use as: "FILE:prompt.txt"
-num_samples = 10  # number of samples to draw
-max_new_tokens = 500  # number of tokens generated in each sample
-temperature = 0.8  # 1.0 = no change, < 1.0 = less random, > 1.0 = more random, in predictions
-top_k = 200  # retain only the top_k most likely tokens, clamp others to have 0 probability
-seed = 1337
-device = "gpu"  # 'cpu', 'gpu', or 'tpu'
-dtype = "bfloat16"  # 'float32', 'bfloat16', or 'float16'
-# -----------------------------------------------------------------------------
+Tokenizer = tuple[Any, Any]
 
-exec(open("configurator.py").read())  # overrides from command line or config file
 
-# -----------------------------------------------------------------------------
+def load_prompt(start: str) -> str:
+    """Load an inline prompt or `FILE:path` prompt source."""
+    if start.startswith("FILE:"):
+        return Path(start[5:]).read_text(encoding="utf-8")
+    return start
 
-# Set random seed
-rng = random.PRNGKey(seed)
 
-# model
-if init_from == "resume":
-    # init from a model saved in a specific directory
-    ckpt_path = os.path.join(out_dir, "ckpt.pkl")
-    with open(ckpt_path, "rb") as f:
-        checkpoint = pickle.load(f)
+def load_meta_tokenizer(meta_path: Path) -> Tokenizer:
+    """Load a dataset tokenizer from `meta.pkl`."""
+    with meta_path.open("rb") as handle:
+        meta = pickle.load(handle)  # noqa: S301
+    if not isinstance(meta, dict):
+        raise TypeError(f"Expected metadata dictionary in {meta_path}")
 
-    # Load model config from checkpoint
-    model_config = checkpoint.get("config", None)
-    if model_config is None:
-        # Fallback to default config
+    stoi = meta["stoi"]
+    itos = meta["itos"]
+
+    def encode_fn(text: str) -> list[int]:
+        return [stoi[char] for char in text]
+
+    def decode_fn(tokens: list[int]) -> str:
+        return "".join(itos[index] for index in tokens)
+
+    return encode_fn, decode_fn
+
+
+def load_tiktoken_tokenizer() -> Tokenizer:
+    """Load the default GPT-2 tokenizer."""
+    encoder = TiktokenEncoder()
+    return encoder.encode, encoder.decode
+
+
+def tokenizer_for_resume(config: SampleConfig, checkpoint: dict[str, Any]) -> Tokenizer:
+    """Pick the best tokenizer for a resumed checkpoint."""
+    dataset = checkpoint.get("dataset", "openwebtext")
+    data_dir = checkpoint.get("data_dir", config.data_dir)
+    meta_path = Path(data_dir) / dataset / "meta.pkl"
+    if meta_path.exists():
+        print(f"Loading tokenizer metadata from {meta_path}")
+        return load_meta_tokenizer(meta_path)
+    print("No dataset metadata found; falling back to GPT-2 tokenizer.")
+    return load_tiktoken_tokenizer()
+
+
+def load_sampling_components(
+    config: SampleConfig,
+) -> tuple[GPT, dict[str, Any], Any, Any]:
+    """Load model variables plus encode/decode functions for sampling."""
+    if config.init_from == "resume":
+        checkpoint = load_training_checkpoint(checkpoint_path(config.out_dir))
+        model_config = model_config_from_checkpoint(checkpoint)
+        model = GPT(model_config)
+        encode_fn, decode_fn = tokenizer_for_resume(config, checkpoint)
+        return model, {"params": checkpoint["params"]}, encode_fn, decode_fn
+
+    if config.init_from.startswith("gpt2"):
+        model_size = get_gpt2_model_size(config.init_from)
+        encoder, hparams, params = load_encoder_hparams_and_params(model_size, config.models_dir)
         model_config = GPTConfig(
-            n_layer=12, n_head=12, n_embd=768, block_size=1024, vocab_size=50304
+            n_layer=int(hparams["n_layer"]),
+            n_head=int(hparams["n_head"]),
+            n_embd=int(hparams["n_embd"]),
+            block_size=int(hparams["n_ctx"]),
+            vocab_size=int(hparams["n_vocab"]),
+            dtype=config.dtype,
         )
+        model = GPT(model_config)
+        variables = {"params": convert_functional_to_flax_params(params, model_config)}
+        return model, variables, encoder.encode, encoder.decode
 
-    model = GPT(model_config)
-    params = checkpoint["params"]
+    raise ValueError(f"Unknown init_from value: {config.init_from}")
 
-    # Check for meta.pkl in the data directory to get the encoder
-    meta_path = os.path.join("data", checkpoint.get("dataset", "openwebtext"), "meta.pkl")
-    load_meta = os.path.exists(meta_path)
 
-elif init_from.startswith("gpt2"):
-    # init from a given GPT-2 model
-    from utils import load_encoder_hparams_and_params
+def sample_texts(config: SampleConfig) -> list[str]:
+    """Generate one or more text samples and return them as strings."""
+    device = resolve_jax_device(config.device)
+    prompt = load_prompt(config.start)
+    rng = random.PRNGKey(config.seed)
 
-    model_size_map = {
-        "gpt2": "124M",
-        "gpt2-medium": "355M",
-        "gpt2-large": "774M",
-        "gpt2-xl": "1558M",
-    }
-    model_size = model_size_map.get(init_from, "124M")
+    with jax.default_device(device):
+        model, variables, encode, decode = load_sampling_components(config)
+        prompt_ids = encode(prompt)
+        if not prompt_ids:
+            raise ValueError("Prompt must contain at least one token")
 
-    encoder, hparams, params = load_encoder_hparams_and_params(model_size, "models")  # type: ignore[arg-type]
+        inputs = jnp.asarray([prompt_ids], dtype=jnp.int32)
+        samples: list[str] = []
+        for _ in range(config.num_samples):
+            rng, sample_rng = random.split(rng)
+            generated = generate(
+                model,
+                variables,
+                inputs,
+                config.max_new_tokens,
+                temperature=config.temperature,
+                top_k=config.top_k,
+                top_p=config.top_p,
+                rng=sample_rng,
+            )
+            samples.append(decode(generated[0].tolist()))
+        return samples
 
-    model_config = GPTConfig(
-        n_layer=hparams["n_layer"],
-        n_head=hparams["n_head"],
-        n_embd=hparams["n_embd"],
-        block_size=hparams["n_ctx"],
-        vocab_size=hparams["n_vocab"],
-    )
-    model = GPT(model_config)
-    load_meta = False
-else:
-    raise ValueError(f"Unknown init_from: {init_from}")
 
-# look for the meta pickle in case it is available in the dataset folder
-if init_from == "resume":
-    if load_meta:
-        print(f"Loading meta from {meta_path}...")
-        with open(meta_path, "rb") as f:
-            meta = pickle.load(f)
-        stoi, itos = meta["stoi"], meta["itos"]
+def main(argv: list[str] | None = None) -> list[str]:
+    """CLI entry point for sampling."""
+    config = parse_sample_config(argv)
+    samples = sample_texts(config)
+    print(f"Generating {len(samples)} sample(s)...")
+    print("=" * 50)
+    for sample_text in samples:
+        print(sample_text)
+        print("-" * 50)
+    return samples
 
-        def encode(s):
-            return [stoi[c] for c in s]
 
-        def decode(tokens):
-            return "".join([itos[i] for i in tokens])
-    else:
-        # Use tiktoken for GPT-2 BPE encoding
-        print("No meta.pkl found, using tiktoken GPT-2 encoding...")
-        import tiktoken
-
-        enc = tiktoken.get_encoding("gpt2")
-
-        def encode(s):
-            return enc.encode(s, allowed_special={"<|endoftext|>"})
-
-        def decode(tokens):
-            return enc.decode(tokens)
-else:
-    # For pretrained models, use the encoder we loaded
-    encode = encoder.encode
-    decode = encoder.decode
-
-# encode the beginning of the prompt
-if start.startswith("FILE:"):
-    with open(start[5:], "r", encoding="utf-8") as f:  # type: ignore[assignment]
-        start = f.read()  # type: ignore[assignment]
-start_ids = encode(start)
-x = jnp.array([start_ids])
-
-# Initialize model with dummy input to get the apply function ready
-rng, init_rng = random.split(rng)
-if init_from == "resume":
-    # For resumed training, params are already loaded
-    variables = {"params": params}
-else:
-    # For pretrained models, convert params format
-    from parameter_converter import convert_functional_to_flax_params
-
-    flax_params = convert_functional_to_flax_params(params, model_config)
-    variables = {"params": flax_params}
-
-# run generation
-print(f"Generating {num_samples} samples...")
-print("=" * 50)
-
-for k in range(num_samples):
-    rng, sample_rng = random.split(rng)
-
-    generated = generate(
-        model,
-        variables,
-        x,
-        max_new_tokens,
-        temperature=temperature,
-        top_k=top_k,
-        rng=sample_rng,
-    )
-
-    tokens = generated[0].tolist()
-    text = decode(tokens)
-    print(text)
-    print("-" * 50)
+if __name__ == "__main__":
+    main()
