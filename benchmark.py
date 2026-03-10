@@ -10,22 +10,23 @@ import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Literal, Optional, Tuple
+from typing import Any, Dict, Literal, Optional, Tuple, cast
 
 import jax
 import jax.numpy as jnp
+import numpy as np
 import optax
 from jax import jit, random, value_and_grad
 
 from model import GPT, GPTConfig
-
-# Model configurations for different sizes
-MODEL_CONFIGS = {
-    "124M": {"n_layer": 12, "n_head": 12, "n_embd": 768},
-    "355M": {"n_layer": 24, "n_head": 16, "n_embd": 1024},
-    "774M": {"n_layer": 36, "n_head": 20, "n_embd": 1280},
-    "1558M": {"n_layer": 48, "n_head": 25, "n_embd": 1600},
-}
+from utils import (
+    DEFAULT_BENCHMARK_PEAK_FLOPS,
+    DEFAULT_GPT2_BLOCK_SIZE,
+    DEFAULT_GPT2_VOCAB_SIZE,
+    get_gpt2_model_spec,
+    resolve_jax_device,
+    sample_language_model_batch,
+)
 
 
 @dataclass
@@ -34,8 +35,8 @@ class BenchmarkConfig:
 
     model_size: Literal["124M", "355M", "774M", "1558M"] = "124M"
     batch_size: int = 8
-    block_size: int = 1024
-    vocab_size: int = 50257
+    block_size: int = DEFAULT_GPT2_BLOCK_SIZE
+    vocab_size: int = DEFAULT_GPT2_VOCAB_SIZE
 
     learning_rate: float = 1e-4
     weight_decay: float = 0.01
@@ -82,14 +83,8 @@ class BenchmarkRunner:
 
     def setup_device(self):
         """Setup JAX device configuration."""
-        if self.config.device == "gpu":
-            # Ensure GPU is available
-            if not jax.devices("gpu"):
-                print("Warning: GPU not available, falling back to CPU")
-                self.config.device = "cpu"
-
-        # Set default device
-        self.device = jax.devices(self.config.device)[0]
+        self.device = resolve_jax_device(self.config.device)
+        self.config.device = self.device.platform
         print(f"Using device: {self.device}")
 
         # Set dtype
@@ -98,7 +93,7 @@ class BenchmarkRunner:
 
     def setup_model(self):
         """Initialize the GPT-2 model."""
-        hparams = MODEL_CONFIGS[self.config.model_size]
+        hparams = get_gpt2_model_spec(self.config.model_size)
 
         self.model_config = GPTConfig(
             n_layer=hparams["n_layer"],
@@ -133,15 +128,20 @@ class BenchmarkRunner:
 
     def setup_real_data(self):
         """Setup real data loading."""
-        data_path = Path(self.config.data_dir) / self.config.dataset
+        candidate_paths = [
+            Path(self.config.data_dir) / self.config.dataset / "train.bin",
+            Path(self.config.data_dir) / "train.bin",
+        ]
 
-        if data_path.exists():
-            self.train_data = jnp.fromfile(data_path, dtype=jnp.uint16)
-            print(f"Loaded real data: {len(self.train_data):,} tokens")
-        else:
-            print("Warning: Real data not found, falling back to synthetic data")
-            self.config.use_real_data = False
-            self.setup_synthetic_data()
+        for train_path in candidate_paths:
+            if train_path.exists():
+                self.train_data = np.memmap(train_path, dtype=np.uint16, mode="r")
+                print(f"Loaded real data: {len(self.train_data):,} tokens from {train_path}")
+                return
+
+        print("Warning: Real data not found, falling back to synthetic data")
+        self.config.use_real_data = False
+        self.setup_synthetic_data()
 
     def setup_synthetic_data(self):
         """Setup synthetic data generation."""
@@ -167,7 +167,10 @@ class BenchmarkRunner:
 
         def loss_fn(params, batch):
             x, y = batch
-            logits, loss, _ = self.model.apply({"params": params}, x, targets=y, training=True)
+            logits, loss, _ = cast(
+                tuple[jax.Array, jax.Array, Any],
+                self.model.apply({"params": params}, x, targets=y, training=True),
+            )
             return loss, logits
 
         def train_step(params, opt_state, batch):
@@ -184,34 +187,16 @@ class BenchmarkRunner:
     def get_batch(self) -> Tuple[jnp.ndarray, jnp.ndarray]:
         """Get a random batch of data."""
         self.rng, batch_rng = random.split(self.rng)
-
-        ix = random.randint(
-            batch_rng, (self.config.batch_size,), 0, len(self.train_data) - self.config.block_size
+        return sample_language_model_batch(
+            self.train_data,
+            batch_size=self.config.batch_size,
+            block_size=self.config.block_size,
+            rng=batch_rng,
         )
-
-        x = jnp.stack(
-            [self.train_data[i : i + self.config.block_size].astype(jnp.int32) for i in ix]
-        )
-        y = jnp.stack(
-            [self.train_data[i + 1 : i + 1 + self.config.block_size].astype(jnp.int32) for i in ix]
-        )
-
-        return x, y
 
     def count_parameters(self) -> int:
         """Count model parameters."""
-        total_params = 0
-
-        def count_dict(d):
-            nonlocal total_params
-            for value in d.values():
-                if isinstance(value, dict):
-                    count_dict(value)
-                elif isinstance(value, jnp.ndarray):
-                    total_params += value.size
-
-        count_dict(self.variables["params"])
-        return total_params
+        return sum(leaf.size for leaf in jax.tree_util.tree_leaves(self.variables["params"]))
 
     @contextmanager
     def measure_time(self, name: str):
@@ -225,15 +210,19 @@ class BenchmarkRunner:
         end_memory = self.get_memory_usage() if self.config.measure_memory else None
 
         duration = end_time - start_time
-        memory_used = end_memory - start_memory if start_memory and end_memory else None
+        memory_used = (
+            end_memory - start_memory
+            if start_memory is not None and end_memory is not None
+            else None
+        )
 
         self.results[f"{name}_time"] = duration
-        if memory_used:
+        if memory_used is not None:
             self.results[f"{name}_memory"] = memory_used
 
         if self.config.verbose:
             print(f"{name}: {duration:.4f}s")
-            if memory_used:
+            if memory_used is not None:
                 print(f"{name} memory: {memory_used:.2f}MB")
 
     def get_memory_usage(self) -> Optional[float]:
@@ -429,7 +418,7 @@ class BenchmarkRunner:
         if self.config.peak_flops is not None:
             peak_flops = self.config.peak_flops
         else:
-            peak_flops = 312e12
+            peak_flops = DEFAULT_BENCHMARK_PEAK_FLOPS
 
         return actual_flops / peak_flops
 
@@ -509,7 +498,10 @@ def main():
     )
     parser.add_argument("--batch_size", type=int, default=8, help="Batch size for benchmarking")
     parser.add_argument(
-        "--block_size", type=int, default=1024, help="Sequence length for benchmarking"
+        "--block_size",
+        type=int,
+        default=DEFAULT_GPT2_BLOCK_SIZE,
+        help="Sequence length for benchmarking",
     )
 
     parser.add_argument(
@@ -539,7 +531,10 @@ def main():
         "--peak_flops",
         type=float,
         default=None,
-        help="Peak device FLOPS for MFU calculation (default: 312e12 for A100 BF16)",
+        help=(
+            "Peak device FLOPS for MFU calculation "
+            f"(default: {DEFAULT_BENCHMARK_PEAK_FLOPS:.0e} for A100 BF16)"
+        ),
     )
 
     parser.add_argument(

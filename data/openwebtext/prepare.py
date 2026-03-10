@@ -4,12 +4,21 @@ Downloads and tokenizes the OpenWebText dataset using GPT-2 BPE encoding.
 Will save train.bin, val.bin containing the ids as raw uint16 bytes.
 """
 
+import importlib
 import os
+from typing import Any
 
 import numpy as np
-import tiktoken
-from datasets import load_dataset
-from tqdm import tqdm
+
+
+def _load_data_dependency(module_name: str) -> Any:
+    try:
+        return importlib.import_module(module_name)
+    except ImportError as exc:
+        raise ImportError(
+            "OpenWebText data prep requires the 'data' extra: pip install -e '.[data]'"
+        ) from exc
+
 
 # number of workers in .map() call
 num_proc = 8
@@ -18,6 +27,10 @@ num_proc = 8
 num_proc_load_dataset = num_proc
 
 if __name__ == "__main__":
+    load_dataset = _load_data_dependency("datasets").load_dataset
+    tiktoken = _load_data_dependency("tiktoken")
+    tqdm = _load_data_dependency("tqdm").tqdm
+
     # takes 54GB in huggingface .cache dir, about 8M documents (8,013,769)
     dataset = load_dataset("openwebtext", num_proc=num_proc_load_dataset)
 

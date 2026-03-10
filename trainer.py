@@ -1,19 +1,42 @@
 """Modern JAX trainer for GPT-2 with advanced features and optimizations."""
 
+import importlib
 import json
 import logging
 import time
 from collections import defaultdict
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional, Tuple
+from typing import Any, Dict, List, Literal, Optional, Tuple, cast
 
 import jax
 import jax.numpy as jnp
 import optax
-import orbax.checkpoint as ocp
 from flax.training import train_state
 from jax import jit, random, value_and_grad
+
+from utils import DEFAULT_GPT2_BLOCK_SIZE, DEFAULT_PADDED_VOCAB_SIZE, sample_language_model_batch
+
+
+def _load_orbax_checkpoint() -> Any:
+    """Import Orbax checkpointing only when trainer checkpoints are used."""
+    try:
+        import orbax.checkpoint as ocp
+    except ImportError as exc:
+        raise ImportError(
+            "Modern trainer checkpoints require the 'trainer' extra: pip install -e '.[trainer]'"
+        ) from exc
+    return ocp
+
+
+def _load_wandb() -> Any:
+    """Import Weights & Biases only when logging is enabled."""
+    try:
+        return importlib.import_module("wandb")
+    except ImportError as exc:
+        raise ImportError(
+            "Weights & Biases logging requires the 'logging' extra: pip install -e '.[logging]'"
+        ) from exc
 
 
 @dataclass
@@ -21,8 +44,8 @@ class TrainingConfig:
     """Configuration for training."""
 
     model_size: Literal["124M", "355M", "774M", "1558M"] = "124M"
-    block_size: int = 1024
-    vocab_size: int = 50304
+    block_size: int = DEFAULT_GPT2_BLOCK_SIZE
+    vocab_size: int = DEFAULT_PADDED_VOCAB_SIZE
 
     batch_size: int = 32
     max_iters: int = 100000
@@ -82,8 +105,7 @@ class MetricsTracker:
 
     def log_to_wandb(self, step: int) -> None:
         try:
-            import wandb
-
+            wandb = _load_wandb()
             if not wandb.run:
                 return
         except ImportError:
@@ -116,18 +138,16 @@ class DataLoader:
         self.batch_size = batch_size
         self.block_size = block_size
         self.rng = random.PRNGKey(seed)
-        self.n_samples = len(data) - block_size
 
     def get_batch(self, split: Literal["train", "val"] = "train") -> Tuple[jax.Array, jax.Array]:
         self.rng, split_rng = random.split(self.rng)
         split_rng = random.fold_in(split_rng, 0 if split == "train" else 1)
-
-        start_indices = random.randint(split_rng, (self.batch_size,), 0, self.n_samples)
-
-        x = jnp.stack([self.data[i : i + self.block_size] for i in start_indices])
-        y = jnp.stack([self.data[i + 1 : i + 1 + self.block_size] for i in start_indices])
-
-        return x, y
+        return sample_language_model_batch(
+            self.data,
+            batch_size=self.batch_size,
+            block_size=self.block_size,
+            rng=split_rng,
+        )
 
     def get_eval_batches(
         self, n_batches: int, split: Literal["train", "val"] = "val"
@@ -142,16 +162,17 @@ class CheckpointManager:
     """Manage model checkpoints."""
 
     def __init__(self, save_dir: str, max_checkpoints: int = 5) -> None:
+        self.ocp = _load_orbax_checkpoint()
         self.save_dir = Path(save_dir)
         self.save_dir.mkdir(exist_ok=True)
         self.max_checkpoints = max_checkpoints
-        self.checkpoint_manager = ocp.CheckpointManager(
+        self.checkpoint_manager = self.ocp.CheckpointManager(
             self.save_dir,
-            options=ocp.CheckpointManagerOptions(max_to_keep=max_checkpoints, create=True),
+            options=self.ocp.CheckpointManagerOptions(max_to_keep=max_checkpoints, create=True),
         )
 
     def save(self, state: train_state.TrainState, step: int, metrics: Dict[str, Any]) -> None:
-        self.checkpoint_manager.save(step, args=ocp.args.StandardSave(state))
+        self.checkpoint_manager.save(step, args=self.ocp.args.StandardSave(state))
 
         metadata = {"step": step, "metrics": metrics, "timestamp": time.time()}
         metadata_path = self.save_dir / f"metadata_{step}.json"
@@ -167,12 +188,12 @@ class CheckpointManager:
         if latest_step is None:
             return None
 
-        state = self.checkpoint_manager.restore(latest_step)
+        state = cast(train_state.TrainState, self.checkpoint_manager.restore(latest_step))
 
         metadata_path = self.save_dir / f"metadata_{latest_step}.json"
         if metadata_path.exists():
             with open(metadata_path, "r") as f:
-                metadata = json.load(f)
+                metadata = cast(Dict[str, Any], json.load(f))
         else:
             metadata = {"step": latest_step, "metrics": {}}
 
@@ -215,8 +236,7 @@ class ModernTrainer:
         )
 
         if config.use_wandb:
-            import wandb
-
+            wandb = _load_wandb()
             wandb.init(project=config.project_name, config=config.to_dict())
 
         self.lr_schedule = self._create_lr_schedule()
@@ -360,8 +380,7 @@ class ModernTrainer:
                 self.logger.info(f"Step {step} | Val Loss: {eval_metrics['loss']:.4f}")
 
                 if self.config.use_wandb:
-                    import wandb
-
+                    wandb = _load_wandb()
                     wandb.log({"val/loss": eval_metrics["loss"]}, step=step)
 
             if step % self.config.save_interval == 0 and step > 0:

@@ -2,6 +2,25 @@ import pytest
 from jax import random
 
 
+def pytest_addoption(parser: pytest.Parser) -> None:
+    parser.addoption(
+        "--run-network",
+        action="store_true",
+        default=False,
+        help="run tests marked as requiring network access",
+    )
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    if config.getoption("--run-network"):
+        return
+
+    skip_network = pytest.mark.skip(reason="need --run-network to run network-dependent tests")
+    for item in items:
+        if "network" in item.keywords:
+            item.add_marker(skip_network)
+
+
 @pytest.fixture
 def rng():
     return random.PRNGKey(42)
