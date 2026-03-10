@@ -1,3 +1,46 @@
+Metadata-Version: 2.4
+Name: jax-gpt
+Version: 0.1.0
+Summary: JAX/Flax implementation of GPT-2, inspired by nanoGPT
+License: MIT
+Requires-Python: >=3.11
+Description-Content-Type: text/markdown
+Requires-Dist: jax>=0.4.30
+Requires-Dist: jaxlib>=0.4.30
+Requires-Dist: flax>=0.8.0
+Requires-Dist: optax>=0.2.0
+Requires-Dist: numpy>=1.26.0
+Provides-Extra: tokenization
+Requires-Dist: tiktoken>=0.7.0; extra == "tokenization"
+Provides-Extra: data
+Requires-Dist: datasets>=2.20.0; extra == "data"
+Requires-Dist: requests>=2.31.0; extra == "data"
+Requires-Dist: tiktoken>=0.7.0; extra == "data"
+Requires-Dist: tqdm>=4.66.0; extra == "data"
+Provides-Extra: pretrained
+Requires-Dist: transformers>=4.40.0; extra == "pretrained"
+Requires-Dist: tiktoken>=0.7.0; extra == "pretrained"
+Provides-Extra: trainer
+Requires-Dist: orbax-checkpoint>=0.6.0; extra == "trainer"
+Provides-Extra: logging
+Requires-Dist: wandb>=0.17.0; extra == "logging"
+Provides-Extra: benchmark
+Requires-Dist: psutil>=5.9.0; extra == "benchmark"
+Provides-Extra: all
+Requires-Dist: datasets>=2.20.0; extra == "all"
+Requires-Dist: orbax-checkpoint>=0.6.0; extra == "all"
+Requires-Dist: psutil>=5.9.0; extra == "all"
+Requires-Dist: requests>=2.31.0; extra == "all"
+Requires-Dist: tiktoken>=0.7.0; extra == "all"
+Requires-Dist: tqdm>=4.66.0; extra == "all"
+Requires-Dist: transformers>=4.40.0; extra == "all"
+Requires-Dist: wandb>=0.17.0; extra == "all"
+Provides-Extra: dev
+Requires-Dist: pytest>=8.0; extra == "dev"
+Requires-Dist: pytest-xdist>=3.5.0; extra == "dev"
+Requires-Dist: ruff>=0.5.0; extra == "dev"
+Requires-Dist: mypy>=1.10.0; extra == "dev"
+
 # jax-gpt
 
 Train, finetune, benchmark, and sample GPT-style language models with JAX/Flax.
@@ -21,26 +64,17 @@ pip install -e ".[pretrained]"
 pip install -e ".[trainer]"
 ```
 
-- `.[tokenization]`: GPT-2 BPE tokenization without the full pretrained/data stack
-- `.[data]`: dataset download and preprocessing scripts
-- `.[pretrained]`: Hugging Face GPT-2 weight loading for pretrained init and sampling
-- `.[trainer]`: Orbax checkpoint support for `trainer.py`
-- `.[logging]`: Weights & Biases experiment logging
-- `.[benchmark]`: process memory reporting fallback in `benchmark.py`
-
 For a full development environment:
 
 ```bash
 pip install -e ".[all,dev]"
 ```
 
-If you prefer a pinned all-features-plus-dev environment, `requirements.txt` is still available.
+If you prefer a pinned all-features environment, `requirements.txt` is still available.
 
 For GPU support, install a JAX build that matches your CUDA setup.
 
 ## quick start
-
-Install `.[data]` if you want to run the dataset preparation scripts.
 
 Prepare the tiny Shakespeare character dataset:
 

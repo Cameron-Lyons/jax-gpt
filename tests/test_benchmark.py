@@ -1,6 +1,7 @@
 """Tests for the benchmark module."""
 
 import jax.numpy as jnp
+import numpy as np
 import pytest
 
 from benchmark import BenchmarkConfig, BenchmarkRunner
@@ -60,6 +61,33 @@ class TestBenchmarkRunner:
         runner = BenchmarkRunner(small_benchmark_config)
         n_params = runner.count_parameters()
         assert n_params > 0
+
+    def test_real_data_loader_uses_train_bin(self, tmp_path):
+        dataset_dir = tmp_path / "data" / "openwebtext"
+        dataset_dir.mkdir(parents=True)
+        np.array([1, 2, 3, 4, 5, 6, 7, 8], dtype=np.uint16).tofile(dataset_dir / "train.bin")
+
+        config = BenchmarkConfig(
+            model_size="124M",
+            batch_size=2,
+            block_size=4,
+            vocab_size=64,
+            warmup_steps=1,
+            benchmark_steps=1,
+            num_runs=1,
+            device="cpu",
+            dtype="float32",
+            compile=False,
+            use_real_data=True,
+            data_dir=str(tmp_path / "data"),
+            dataset="openwebtext",
+            save_results=False,
+            verbose=False,
+        )
+
+        runner = BenchmarkRunner(config)
+        assert runner.config.use_real_data is True
+        assert len(runner.train_data) == 8
 
 
 class TestMFU:

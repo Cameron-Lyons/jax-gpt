@@ -5,7 +5,7 @@ import jax.numpy as jnp
 import pytest
 from jax import random
 
-from model import GPT, GPTConfig
+from model import GPT, GPTConfig, generate
 
 
 @pytest.fixture
@@ -91,3 +91,10 @@ class TestAutoregressive:
         logits1, _, _ = model.apply(variables, prompt, training=False)
         logits2, _, _ = model.apply(variables, prompt, training=False)
         assert jnp.allclose(logits1, logits2)
+
+    def test_generate_rejects_context_overflow(self, tiny_model):
+        model, variables, config = tiny_model
+        prompt = jnp.ones((1, config.block_size - 1), dtype=jnp.int32)
+
+        with pytest.raises(ValueError):
+            generate(model, variables, prompt, max_new_tokens=2, temperature=0.0)

@@ -24,6 +24,13 @@ from flax import linen as nn
 from flax.struct import dataclass
 from jax import random
 
+from utils import (
+    CAUSAL_MASK_FILL_VALUE,
+    DEFAULT_GPT2_BLOCK_SIZE,
+    DEFAULT_GPT2_VOCAB_SIZE,
+    get_gpt2_model_spec,
+)
+
 
 @dataclass
 class GPTConfig:
@@ -33,8 +40,8 @@ class GPTConfig:
     n_layer: int = 12
     n_head: int = 12
     n_embd: int = 768
-    vocab_size: int = 50257
-    block_size: int = 1024
+    vocab_size: int = DEFAULT_GPT2_VOCAB_SIZE
+    block_size: int = DEFAULT_GPT2_BLOCK_SIZE
     embd_pdrop: float = 0.1
     resid_pdrop: float = 0.1
     attn_pdrop: float = 0.1
@@ -199,7 +206,7 @@ class CausalSelfAttention(nn.Module):
                 mask = (col_idx > row_idx).astype(att.dtype)
             else:
                 mask = jnp.triu(jnp.ones((T, T_kv), dtype=att.dtype), k=1)
-            att = jnp.where(mask == 1, -1e9, att)
+            att = jnp.where(mask == 1, CAUSAL_MASK_FILL_VALUE, att)
 
             att = jax.nn.softmax(att, axis=-1)
             if self.reorder_and_upcast_attn:
@@ -388,21 +395,15 @@ class GPT(nn.Module):
         Returns:
             GPT model instance (not yet initialized; call .init() next)
         """
-        model_configs = {
-            "gpt2": dict(n_layer=12, n_head=12, n_embd=768),
-            "gpt2-medium": dict(n_layer=24, n_head=16, n_embd=1024),
-            "gpt2-large": dict(n_layer=36, n_head=20, n_embd=1280),
-            "gpt2-xl": dict(n_layer=48, n_head=25, n_embd=1600),
-        }
-
-        if model_type not in model_configs:
-            raise ValueError(f"Unknown model type: {model_type}")
+        model_spec = get_gpt2_model_spec(model_type)
 
         config = GPTConfig(
             model_type=model_type,
-            vocab_size=50257,
-            block_size=1024,
-            **model_configs[model_type],  # type: ignore[arg-type]
+            vocab_size=DEFAULT_GPT2_VOCAB_SIZE,
+            block_size=DEFAULT_GPT2_BLOCK_SIZE,
+            n_layer=model_spec["n_layer"],
+            n_head=model_spec["n_head"],
+            n_embd=model_spec["n_embd"],
             **kwargs,
         )
 
@@ -422,7 +423,7 @@ def get_model_size_mb(params: Dict[str, Any]) -> float:
 
 def configure_optimizers(
     params: Dict[str, Any],
-    learning_rate: float,
+    learning_rate: float | optax.Schedule,
     weight_decay: float,
     betas: tuple[float, float] = (0.9, 0.95),
     grad_clip: float = 1.0,
@@ -460,8 +461,8 @@ def configure_optimizers(
 
 def create_gpt_model(
     model_type: str = "gpt2",
-    vocab_size: int = 50257,
-    block_size: int = 1024,
+    vocab_size: int = DEFAULT_GPT2_VOCAB_SIZE,
+    block_size: int = DEFAULT_GPT2_BLOCK_SIZE,
     **kwargs: Any,
 ) -> GPT:
     """Convenience function to create a GPT model."""
@@ -512,6 +513,14 @@ def generate(
 
     B, T = idx.shape
     config = model.config
+    if T > config.block_size:
+        idx = idx[:, -config.block_size :]
+        T = idx.shape[1]
+    if T + max_new_tokens > config.block_size:
+        raise ValueError(
+            "Prompt length plus max_new_tokens exceeds the model block size; "
+            f"got {T} + {max_new_tokens} > {config.block_size}"
+        )
     head_dim = config.n_embd // config.n_head
     cache_dtype = getattr(jnp, config.dtype)
 

@@ -7,17 +7,20 @@ import jax
 import jax.numpy as jnp
 from jax import jit, random
 
-from utils import load_encoder_hparams_and_params
+from utils import (
+    CAUSAL_MASK_FILL_VALUE,
+    DEFAULT_GPT2_BLOCK_SIZE,
+    DEFAULT_PADDED_VOCAB_SIZE,
+    load_encoder_hparams_and_params,
+)
 
 
 @dataclass
 class GPTConfig:
     """GPT-2 model configuration."""
 
-    block_size: int = 1024
-    vocab_size: int = (
-        50304  # GPT-2 vocab_size of 50257, padded up to nearest multiple of 64 for efficiency
-    )
+    block_size: int = DEFAULT_GPT2_BLOCK_SIZE
+    vocab_size: int = DEFAULT_PADDED_VOCAB_SIZE
     n_layer: int = 12
     n_head: int = 12
     n_embd: int = 768
@@ -25,15 +28,6 @@ class GPTConfig:
     bias: bool = (
         True  # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
     )
-
-
-@jit
-def lm_loss(params, inputs, n_head) -> jax.Array:
-    """Cross-entropy loss for language models."""
-    x, y = inputs[:-1], inputs[1:]
-    output = gpt2(x, **params, n_head=n_head)
-    loss = jnp.mean(-jnp.log(output[y]))
-    return loss
 
 
 @jit
@@ -75,25 +69,13 @@ def attention(q: jax.Array, k: jax.Array, v: jax.Array, mask: jax.Array) -> jax.
 
 
 @jit
-def causal_self_attention(x: jax.Array, c_attn: Dict, c_proj: Dict):
-    """Attention layer with a causal mask to prevent attending to future tokens."""
-    x = linear(x, **c_attn)
-
-    q, k, v = jnp.split(x, 3, axis=1)
-    mask: jax.Array = (1 - jnp.tri(x.shape[0], dtype=x.dtype)) * -1e10
-    x = attention(q, k, v, mask)
-
-    return linear(x, **c_proj)
-
-
-@jit
 def multihead_attn(x: jax.Array, c_attn: Dict, c_proj: Dict, n_head: int) -> jax.Array:
     """Multi-head attention layer.
     Splits input into n_head chunks and runs attention on each chunk."""
     x = linear(x, **c_attn)
     qkv = jnp.split(x, 3, axis=-1)
     qkv_heads = list(map(lambda x: jnp.split(x, n_head, axis=1), qkv))
-    causal_mask = (1 - jnp.tri(x.shape[0], dtype=x.dtype)) * -1e10
+    causal_mask = (1 - jnp.tri(x.shape[0], dtype=x.dtype)) * CAUSAL_MASK_FILL_VALUE
     out_heads = [attention(q, k, v, causal_mask) for q, k, v in zip(*qkv_heads)]
     x = jnp.hstack(out_heads)
     return linear(x, **c_proj)  # type: ignore[no-any-return]
@@ -197,41 +179,6 @@ def generate(
         rng, step_rng = random.split(rng)
         next_id, _ = generate_step(input_array, params, n_head, temperature, top_k, top_p, step_rng)
         next_id = int(next_id)
-        generated_tokens.append(next_id)
-        input_array = jnp.append(input_array, next_id)
-
-    return generated_tokens
-
-
-def generate_with_stopping(
-    inputs: List[int],
-    params: Dict[str, Any],
-    n_head: int,
-    max_tokens: int,
-    stop_tokens: Optional[List[int]] = None,
-    temperature: float = 1.0,
-    top_k: Optional[int] = None,
-    top_p: Optional[float] = None,
-    rng: Optional[jax.Array] = None,
-) -> List[int]:
-    """Generate text with stopping conditions."""
-    if rng is None:
-        rng = random.PRNGKey(0)
-
-    if stop_tokens is None:
-        stop_tokens = []
-
-    input_array = jnp.array(inputs)
-    generated_tokens = []
-
-    for _ in range(max_tokens):
-        rng, step_rng = random.split(rng)
-        next_id, _ = generate_step(input_array, params, n_head, temperature, top_k, top_p, step_rng)
-        next_id = int(next_id)
-
-        if next_id in stop_tokens:
-            break
-
         generated_tokens.append(next_id)
         input_array = jnp.append(input_array, next_id)
 
