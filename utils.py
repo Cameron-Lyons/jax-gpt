@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import pickle
 from pathlib import Path
-from typing import Any, Dict, List, Literal, cast
+from typing import AbstractSet, Any, Dict, List, Literal, Protocol, Sequence, cast
 
 import jax
 import jax.numpy as jnp
@@ -41,7 +41,18 @@ GPT2_MODEL_SPECS: dict[str, dict[str, int]] = {
 }
 
 
-def _load_tiktoken() -> Any:
+class _TiktokenEncoding(Protocol):
+    def encode(
+        self, text: str, *, allowed_special: AbstractSet[str] | Literal["all"] = ...
+    ) -> list[int]: ...
+    def decode(self, tokens: Sequence[int]) -> str: ...
+
+
+class _TiktokenModule(Protocol):
+    def get_encoding(self, encoding_name: str) -> _TiktokenEncoding: ...
+
+
+def _load_tiktoken() -> _TiktokenModule:
     """Import tiktoken only when GPT-2 tokenization is needed."""
     try:
         import tiktoken
@@ -49,7 +60,7 @@ def _load_tiktoken() -> Any:
         raise ImportError(
             "GPT-2 tokenization requires the 'tokenization' extra: pip install -e '.[tokenization]'"
         ) from exc
-    return tiktoken
+    return cast(_TiktokenModule, tiktoken)
 
 
 class TiktokenEncoder:
@@ -60,10 +71,10 @@ class TiktokenEncoder:
         self.n_vocab = DEFAULT_GPT2_VOCAB_SIZE
 
     def encode(self, text: str) -> List[int]:
-        return self.enc.encode(text, allowed_special={"<|endoftext|>"})  # type: ignore[no-any-return]
+        return self.enc.encode(text, allowed_special={"<|endoftext|>"})
 
     def decode(self, tokens: List[int]) -> str:
-        return self.enc.decode(tokens)  # type: ignore[no-any-return]
+        return self.enc.decode(tokens)
 
 
 def get_gpt2_model_name(model_variant: str | ModelSize) -> str:

@@ -1,5 +1,5 @@
 import math
-from typing import Any, Dict
+from typing import Any, Dict, cast
 
 import flax
 import flax.traverse_util
@@ -429,7 +429,7 @@ def configure_optimizers(
 
     def decay_mask_fn(params: Dict[str, Any]) -> Dict[str, Any]:
         flat_params = flax.traverse_util.flatten_dict(params, sep="/")
-        mask = {}
+        mask: dict[str, bool] = {}
         for key in flat_params:
             parts = key.split("/")
             param_name = parts[-1]
@@ -437,7 +437,7 @@ def configure_optimizers(
                 mask[key] = True
             else:
                 mask[key] = False
-        return flax.traverse_util.unflatten_dict(mask, sep="/")  # type: ignore[no-any-return]
+        return cast(Dict[str, Any], flax.traverse_util.unflatten_dict(mask, sep="/"))
 
     tx = optax.chain(
         optax.clip_by_global_norm(grad_clip) if grad_clip > 0.0 else optax.identity(),
