@@ -1,7 +1,7 @@
 """GPT-2 model. For text generation."""
 
 from dataclasses import dataclass
-from typing import Any, Dict, List, Literal, Optional, Tuple
+from typing import Any, Dict, List, Literal, Optional, Tuple, cast
 
 import jax
 import jax.numpy as jnp
@@ -13,6 +13,8 @@ from utils import (
     DEFAULT_PADDED_VOCAB_SIZE,
     load_encoder_hparams_and_params,
 )
+
+LinearParams = Dict[str, jax.Array]
 
 
 @dataclass
@@ -65,11 +67,13 @@ def layer_norm(x: jax.Array, g: jax.Array, b: jax.Array, eps: float = 1e-5) -> j
 @jit
 def attention(q: jax.Array, k: jax.Array, v: jax.Array, mask: jax.Array) -> jax.Array:
     """Scaled dot-product attention."""
-    return softmax(q @ k.T / jnp.sqrt(q.shape[-1]) + mask) @ v  # type: ignore[no-any-return]
+    return cast(jax.Array, softmax(q @ k.T / jnp.sqrt(q.shape[-1]) + mask) @ v)
 
 
 @jit
-def multihead_attn(x: jax.Array, c_attn: Dict, c_proj: Dict, n_head: int) -> jax.Array:
+def multihead_attn(
+    x: jax.Array, c_attn: LinearParams, c_proj: LinearParams, n_head: int
+) -> jax.Array:
     """Multi-head attention layer.
     Splits input into n_head chunks and runs attention on each chunk."""
     x = linear(x, **c_attn)
@@ -78,7 +82,7 @@ def multihead_attn(x: jax.Array, c_attn: Dict, c_proj: Dict, n_head: int) -> jax
     causal_mask = (1 - jnp.tri(x.shape[0], dtype=x.dtype)) * CAUSAL_MASK_FILL_VALUE
     out_heads = [attention(q, k, v, causal_mask) for q, k, v in zip(*qkv_heads)]
     x = jnp.hstack(out_heads)
-    return linear(x, **c_proj)  # type: ignore[no-any-return]
+    return cast(jax.Array, linear(x, **c_proj))
 
 
 @jit
@@ -148,10 +152,15 @@ def generate_step(
     logits = gpt2(inputs, **params, n_head=n_head)
     logits = logits[-1] / temperature
 
+    if (top_k is not None or top_p is not None) and rng is None:
+        raise ValueError("rng is required when top_k or top_p sampling is enabled")
+
     if top_k is not None:
-        next_id = sample_top_k(logits, top_k, rng)  # type: ignore[arg-type]
+        assert rng is not None
+        next_id = sample_top_k(logits, top_k, rng)
     elif top_p is not None:
-        next_id = sample_top_p(logits, top_p, rng)  # type: ignore[arg-type]
+        assert rng is not None
+        next_id = sample_top_p(logits, top_p, rng)
     else:
         next_id = jnp.argmax(logits)
 

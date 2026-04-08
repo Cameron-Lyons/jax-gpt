@@ -7,7 +7,7 @@ parameters are replicated across all devices.
 Falls back gracefully to a single device when only one is available.
 """
 
-from typing import Any, Dict
+from typing import Any, Dict, cast
 
 import jax
 from jax.sharding import Mesh, NamedSharding
@@ -33,7 +33,7 @@ def replicated_sharding(mesh: Mesh) -> NamedSharding:
 def shard_params(params: Dict[str, Any], mesh: Mesh) -> Dict[str, Any]:
     """Replicate parameters across all devices."""
     rep = replicated_sharding(mesh)
-    return jax.tree.map(lambda x: jax.device_put(x, rep), params)  # type: ignore[no-any-return]
+    return cast(Dict[str, Any], jax.tree.map(lambda x: jax.device_put(x, rep), params))
 
 
 def shard_batch(
