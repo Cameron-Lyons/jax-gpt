@@ -6,5 +6,4 @@ parameter_converter
 sample
 sharding
 train
-trainer
 utils

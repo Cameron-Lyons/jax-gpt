@@ -29,7 +29,6 @@ num_proc_load_dataset = num_proc
 if __name__ == "__main__":
     load_dataset = _load_data_dependency("datasets").load_dataset
     tiktoken = _load_data_dependency("tiktoken")
-    tqdm = _load_data_dependency("tqdm").tqdm
 
     # takes 54GB in huggingface .cache dir, about 8M documents (8,013,769)
     dataset = load_dataset("openwebtext", num_proc=num_proc_load_dataset)
@@ -65,7 +64,7 @@ if __name__ == "__main__":
         total_batches = 1024
 
         idx = 0
-        for batch_idx in tqdm(range(total_batches), desc=f"writing {filename}"):
+        for batch_idx in range(total_batches):
             # Batch together samples for faster write
             batch = dset.shard(
                 num_shards=total_batches, index=batch_idx, contiguous=True

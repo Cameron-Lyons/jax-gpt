@@ -14,15 +14,13 @@ def test_parse_train_config_from_python_file(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    config = parse_train_config(
-        [str(config_path), "--learning_rate=0.001", "--wandb_run_name='toy-run'"]
-    )
+    config = parse_train_config([str(config_path), "--learning_rate=0.001", "--dataset='toy-set'"])
 
     assert config.batch_size == 4
     assert config.gradient_accumulation_steps == 40
     assert config.compile is False
     assert config.learning_rate == pytest.approx(0.001)
-    assert config.wandb_run_name == "toy-run"
+    assert config.dataset == "toy-set"
 
 
 def test_parse_sample_config_supports_optional_overrides() -> None:

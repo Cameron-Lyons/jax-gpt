@@ -4,6 +4,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
+import benchmark as benchmark_module
 from benchmark import BenchmarkConfig, BenchmarkRunner
 
 
@@ -61,6 +62,19 @@ class TestBenchmarkRunner:
         runner = BenchmarkRunner(small_benchmark_config)
         n_params = runner.count_parameters()
         assert n_params > 0
+
+    def test_get_memory_usage_returns_none_without_device_stats(
+        self, monkeypatch, small_benchmark_config
+    ):
+        runner = BenchmarkRunner(small_benchmark_config)
+
+        class FakeDevice:
+            def memory_stats(self):
+                raise RuntimeError("unavailable")
+
+        monkeypatch.setattr(benchmark_module.jax, "devices", lambda: [FakeDevice()])
+
+        assert runner.get_memory_usage() is None
 
     def test_real_data_loader_uses_train_bin(self, tmp_path):
         dataset_dir = tmp_path / "data" / "openwebtext"
