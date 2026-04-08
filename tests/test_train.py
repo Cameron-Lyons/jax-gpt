@@ -6,7 +6,7 @@ import optax
 import pytest
 from jax import random
 
-from model import GPT, GPTConfig
+from jax_gpt.model import GPT, GPTConfig
 
 
 @pytest.fixture

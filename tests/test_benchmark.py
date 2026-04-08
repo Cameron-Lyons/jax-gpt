@@ -4,8 +4,8 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-import benchmark as benchmark_module
-from benchmark import BenchmarkConfig, BenchmarkRunner
+import jax_gpt.benchmark as benchmark_module
+from jax_gpt.benchmark import BenchmarkConfig, BenchmarkRunner
 
 
 @pytest.fixture

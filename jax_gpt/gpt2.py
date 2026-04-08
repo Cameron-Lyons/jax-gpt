@@ -7,7 +7,7 @@ import jax
 import jax.numpy as jnp
 from jax import jit, random
 
-from utils import (
+from .utils import (
     CAUSAL_MASK_FILL_VALUE,
     DEFAULT_GPT2_BLOCK_SIZE,
     DEFAULT_PADDED_VOCAB_SIZE,

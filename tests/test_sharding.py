@@ -10,7 +10,7 @@ import jax
 import jax.numpy as jnp
 from jax import random
 
-from sharding import (
+from jax_gpt.sharding import (
     create_mesh,
     data_sharding,
     get_num_devices,
@@ -70,7 +70,7 @@ class TestSharding:
 
 class TestWithModel:
     def test_sharded_forward(self):
-        from model import GPT, GPTConfig
+        from jax_gpt.model import GPT, GPTConfig
 
         mesh = create_mesh()
         n_devices = get_num_devices()

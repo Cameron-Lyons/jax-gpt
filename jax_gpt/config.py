@@ -10,7 +10,7 @@ from dataclasses import asdict, dataclass, fields, replace
 from pathlib import Path
 from typing import Any, Sequence, TypeVar
 
-from utils import DEFAULT_GPT2_BLOCK_SIZE
+from .utils import DEFAULT_GPT2_BLOCK_SIZE
 
 ConfigT = TypeVar("ConfigT", bound="BaseConfig")
 

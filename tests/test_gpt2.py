@@ -3,7 +3,7 @@
 import jax.numpy as jnp
 import pytest
 
-from gpt2 import (
+from jax_gpt.gpt2 import (
     GPTConfig,
     attention,
     gelu,
@@ -90,7 +90,7 @@ class TestJITCompilation:
 @pytest.mark.network
 class TestModelLoading:
     def test_load_encoder_and_params(self):
-        from gpt2 import load_encoder_hparams_and_params
+        from jax_gpt.gpt2 import load_encoder_hparams_and_params
 
         encoder, hparams, params = load_encoder_hparams_and_params("124M", "models")
         assert encoder is not None
@@ -98,7 +98,7 @@ class TestModelLoading:
         assert params is not None
 
     def test_encode_decode_roundtrip(self):
-        from gpt2 import load_encoder_hparams_and_params
+        from jax_gpt.gpt2 import load_encoder_hparams_and_params
 
         encoder, _, _ = load_encoder_hparams_and_params("124M", "models")
         text = "Hello, world!"
@@ -106,7 +106,7 @@ class TestModelLoading:
         assert len(tokens) > 0
 
     def test_generation(self):
-        from gpt2 import generate, load_encoder_hparams_and_params
+        from jax_gpt.gpt2 import generate, load_encoder_hparams_and_params
 
         encoder, hparams, params = load_encoder_hparams_and_params("124M", "models")
         input_ids = encoder.encode("Hello")

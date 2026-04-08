@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import pickle
 import time
 from dataclasses import asdict, dataclass, replace
-from pathlib import Path
 from typing import Any, cast
 
 import jax
@@ -14,30 +12,19 @@ import numpy as np
 import optax
 from jax import random
 
-from configurator import TrainConfig, parse_train_config
-from model import GPT, GPTConfig, configure_optimizers
-from parameter_converter import convert_functional_to_flax_params
-from utils import (
+from .checkpoints import checkpoint_path, model_config_from_checkpoint
+from .config import TrainConfig, parse_train_config
+from .data import TokenDataset, get_batch, load_token_dataset
+from .model import GPT, GPTConfig, configure_optimizers
+from .parameter_converter import convert_functional_to_flax_params
+from .utils import (
     DEFAULT_PADDED_VOCAB_SIZE,
     get_gpt2_model_size,
     load_encoder_hparams_and_params,
     load_training_checkpoint,
     resolve_jax_device,
-    sample_language_model_batch,
     save_training_checkpoint,
 )
-
-CHECKPOINT_FILENAME = "ckpt.pkl"
-
-
-@dataclass
-class TokenDataset:
-    """Memory-mapped train/validation token arrays plus optional metadata."""
-
-    train_tokens: np.memmap
-    val_tokens: np.memmap
-    meta: dict[str, Any] | None
-    dataset_dir: Path
 
 
 @dataclass
@@ -51,21 +38,6 @@ class TrainingArtifacts:
     iter_num: int
     best_val_loss: float
     rng: jax.Array
-
-
-def checkpoint_path(out_dir: str | Path) -> Path:
-    """Return the canonical checkpoint path for an output directory."""
-    return Path(out_dir) / CHECKPOINT_FILENAME
-
-
-def _load_meta(meta_path: Path) -> dict[str, Any] | None:
-    if not meta_path.exists():
-        return None
-    with meta_path.open("rb") as handle:
-        meta = pickle.load(handle)  # noqa: S301
-    if not isinstance(meta, dict):
-        raise TypeError(f"Expected metadata dictionary in {meta_path}")
-    return meta
 
 
 def prepare_resume_config(config: TrainConfig) -> tuple[TrainConfig, dict[str, Any] | None]:
@@ -82,41 +54,6 @@ def prepare_resume_config(config: TrainConfig) -> tuple[TrainConfig, dict[str, A
     if updates:
         config = replace(config, **updates)
     return config, checkpoint
-
-
-def load_token_dataset(config: TrainConfig) -> TokenDataset:
-    """Open dataset memmaps once and keep them alive for the full training run."""
-    dataset_dir = Path(config.data_dir) / config.dataset
-    train_path = dataset_dir / "train.bin"
-    val_path = dataset_dir / "val.bin"
-
-    if not train_path.exists():
-        raise FileNotFoundError(f"Training data not found: {train_path}")
-    if not val_path.exists():
-        raise FileNotFoundError(f"Validation data not found: {val_path}")
-
-    return TokenDataset(
-        train_tokens=np.memmap(train_path, dtype=np.uint16, mode="r"),
-        val_tokens=np.memmap(val_path, dtype=np.uint16, mode="r"),
-        meta=_load_meta(dataset_dir / "meta.pkl"),
-        dataset_dir=dataset_dir,
-    )
-
-
-def get_batch(
-    tokens: np.memmap,
-    *,
-    batch_size: int,
-    block_size: int,
-    rng: jax.Array,
-) -> tuple[jax.Array, jax.Array]:
-    """Sample a batch from a token memmap."""
-    return sample_language_model_batch(
-        tokens,
-        batch_size=batch_size,
-        block_size=block_size,
-        rng=rng,
-    )
 
 
 def create_lr_schedule(config: TrainConfig) -> optax.Schedule:
@@ -167,24 +104,6 @@ def build_model_config(
         bias=config.bias if bias is None else bias,
         dtype=config.dtype,
     )
-
-
-def model_config_from_checkpoint(checkpoint: dict[str, Any]) -> GPTConfig:
-    """Rebuild a model config from current or legacy checkpoint formats."""
-    raw_values = (
-        checkpoint.get("model_config") or checkpoint.get("model_args") or checkpoint.get("config")
-    )
-    if not isinstance(raw_values, dict):
-        raise ValueError("Checkpoint does not contain model configuration")
-
-    model_values = {
-        key: value for key, value in raw_values.items() if key in GPTConfig.__dataclass_fields__
-    }
-    if "dropout" in raw_values:
-        model_values.setdefault("embd_pdrop", raw_values["dropout"])
-        model_values.setdefault("resid_pdrop", raw_values["dropout"])
-        model_values.setdefault("attn_pdrop", raw_values["dropout"])
-    return GPTConfig(**model_values)
 
 
 def create_step_functions(
@@ -274,6 +193,101 @@ def estimate_loss(
             split_losses.append(float(eval_step(params, x, y)))
         losses[split_name] = float(np.mean(split_losses))
     return losses, rng
+
+
+def run_training_step(
+    *,
+    config: TrainConfig,
+    dataset: TokenDataset,
+    artifacts: TrainingArtifacts,
+    optimizer: optax.GradientTransformation,
+    train_step: Any,
+    accumulate_gradients: Any,
+) -> float:
+    """Run one optimizer step, including optional gradient accumulation."""
+    if config.gradient_accumulation_steps == 1:
+        artifacts.rng, batch_rng, step_rng = random.split(artifacts.rng, 3)
+        x, y = get_batch(
+            dataset.train_tokens,
+            batch_size=config.batch_size,
+            block_size=artifacts.model_config.block_size,
+            rng=batch_rng,
+        )
+        artifacts.params, artifacts.opt_state, loss = train_step(
+            artifacts.params,
+            artifacts.opt_state,
+            x,
+            y,
+            step_rng,
+        )
+        return float(loss)
+
+    total_loss = 0.0
+    accumulated_grads: Any | None = None
+    for _ in range(config.gradient_accumulation_steps):
+        artifacts.rng, batch_rng, step_rng = random.split(artifacts.rng, 3)
+        x, y = get_batch(
+            dataset.train_tokens,
+            batch_size=config.batch_size,
+            block_size=artifacts.model_config.block_size,
+            rng=batch_rng,
+        )
+        micro_loss, micro_grads = accumulate_gradients(artifacts.params, x, y, step_rng)
+        total_loss += float(micro_loss)
+        if accumulated_grads is None:
+            accumulated_grads = micro_grads
+        else:
+            accumulated_grads = jax.tree_util.tree_map(
+                lambda left, right: left + right,
+                accumulated_grads,
+                micro_grads,
+            )
+
+    assert accumulated_grads is not None
+    averaged_grads = jax.tree_util.tree_map(
+        lambda value: value / config.gradient_accumulation_steps,
+        accumulated_grads,
+    )
+    updates, artifacts.opt_state = optimizer.update(
+        averaged_grads,
+        artifacts.opt_state,
+        artifacts.params,
+    )
+    artifacts.params = optax.apply_updates(artifacts.params, updates)
+    return total_loss / config.gradient_accumulation_steps
+
+
+def maybe_evaluate_and_checkpoint(
+    *,
+    config: TrainConfig,
+    dataset: TokenDataset,
+    artifacts: TrainingArtifacts,
+    eval_step: Any,
+) -> bool:
+    """Run evaluation and persist the current checkpoint when configured."""
+    losses, artifacts.rng = estimate_loss(
+        params=artifacts.params,
+        dataset=dataset,
+        batch_size=config.batch_size,
+        block_size=artifacts.model_config.block_size,
+        eval_iters=config.eval_iters,
+        eval_step=eval_step,
+        rng=artifacts.rng,
+    )
+    print(
+        f"step {artifacts.iter_num}: "
+        f"train loss {losses['train']:.4f}, val loss {losses['val']:.4f}"
+    )
+
+    if losses["val"] < artifacts.best_val_loss:
+        artifacts.best_val_loss = losses["val"]
+
+    should_save = artifacts.iter_num > 0 and (
+        losses["val"] <= artifacts.best_val_loss or config.always_save_checkpoint
+    )
+    if should_save:
+        save_checkpoint_state(config, artifacts)
+    return should_save
 
 
 def initialize_training(
@@ -387,7 +401,7 @@ def train(config: TrainConfig) -> dict[str, Any]:
         raise ValueError("gradient_accumulation_steps must be at least 1")
 
     config, resume_checkpoint = prepare_resume_config(config)
-    dataset = load_token_dataset(config)
+    dataset = load_token_dataset(config.data_dir, config.dataset)
     device = resolve_jax_device(config.device)
 
     with jax.default_device(device):
@@ -422,80 +436,25 @@ def train(config: TrainConfig) -> dict[str, Any]:
             current_lr = float(lr_schedule(artifacts.iter_num))
 
             if artifacts.iter_num % config.eval_interval == 0:
-                losses, artifacts.rng = estimate_loss(
-                    params=artifacts.params,
+                if maybe_evaluate_and_checkpoint(
+                    config=config,
                     dataset=dataset,
-                    batch_size=config.batch_size,
-                    block_size=artifacts.model_config.block_size,
-                    eval_iters=config.eval_iters,
+                    artifacts=artifacts,
                     eval_step=eval_step,
-                    rng=artifacts.rng,
-                )
-                print(
-                    f"step {artifacts.iter_num}: "
-                    f"train loss {losses['train']:.4f}, val loss {losses['val']:.4f}"
-                )
-
-                if losses["val"] < artifacts.best_val_loss:
-                    artifacts.best_val_loss = losses["val"]
-                if (losses["val"] <= artifacts.best_val_loss or config.always_save_checkpoint) and (
-                    artifacts.iter_num > 0
                 ):
-                    save_checkpoint_state(config, artifacts)
                     last_checkpoint_iter = artifacts.iter_num
 
                 if config.eval_only:
                     break
 
-            if config.gradient_accumulation_steps == 1:
-                artifacts.rng, batch_rng, step_rng = random.split(artifacts.rng, 3)
-                x, y = get_batch(
-                    dataset.train_tokens,
-                    batch_size=config.batch_size,
-                    block_size=artifacts.model_config.block_size,
-                    rng=batch_rng,
-                )
-                artifacts.params, artifacts.opt_state, loss = train_step(
-                    artifacts.params,
-                    artifacts.opt_state,
-                    x,
-                    y,
-                    step_rng,
-                )
-            else:
-                total_loss = 0.0
-                accumulated_grads: Any | None = None
-                for _ in range(config.gradient_accumulation_steps):
-                    artifacts.rng, batch_rng, step_rng = random.split(artifacts.rng, 3)
-                    x, y = get_batch(
-                        dataset.train_tokens,
-                        batch_size=config.batch_size,
-                        block_size=artifacts.model_config.block_size,
-                        rng=batch_rng,
-                    )
-                    micro_loss, micro_grads = accumulate_gradients(artifacts.params, x, y, step_rng)
-                    total_loss += float(micro_loss)
-                    if accumulated_grads is None:
-                        accumulated_grads = micro_grads
-                    else:
-                        accumulated_grads = jax.tree_util.tree_map(
-                            lambda left, right: left + right,
-                            accumulated_grads,
-                            micro_grads,
-                        )
-
-                assert accumulated_grads is not None
-                averaged_grads = jax.tree_util.tree_map(
-                    lambda value: value / config.gradient_accumulation_steps,
-                    accumulated_grads,
-                )
-                updates, artifacts.opt_state = optimizer.update(
-                    averaged_grads,
-                    artifacts.opt_state,
-                    artifacts.params,
-                )
-                artifacts.params = optax.apply_updates(artifacts.params, updates)
-                loss = total_loss / config.gradient_accumulation_steps
+            loss = run_training_step(
+                config=config,
+                dataset=dataset,
+                artifacts=artifacts,
+                optimizer=optimizer,
+                train_step=train_step,
+                accumulate_gradients=accumulate_gradients,
+            )
 
             t1 = time.time()
             dt = t1 - t0
@@ -504,7 +463,7 @@ def train(config: TrainConfig) -> dict[str, Any]:
             if artifacts.iter_num % config.log_interval == 0:
                 print(
                     f"iter {artifacts.iter_num}: "
-                    f"loss {float(loss):.4f}, time {dt * 1000:.2f}ms, lr {current_lr:.2e}"
+                    f"loss {loss:.4f}, time {dt * 1000:.2f}ms, lr {current_lr:.2e}"
                 )
 
             artifacts.iter_num += 1

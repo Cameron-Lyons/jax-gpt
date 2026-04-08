@@ -5,7 +5,7 @@ from typing import Any, Dict
 import jax
 import jax.numpy as jnp
 
-from model import GPT, GPTConfig
+from .model import GPT, GPTConfig
 
 
 def convert_functional_to_flax_params(
@@ -151,7 +151,7 @@ def verify_parameter_conversion(
     n_head: int,
 ) -> bool:
     """Verify that parameter conversion is correct by comparing outputs."""
-    from gpt2 import gpt2 as gpt2_fn
+    from .gpt2 import gpt2 as gpt2_fn
 
     functional_output = gpt2_fn(dummy_input, **functional_params, n_head=n_head)
 

@@ -5,7 +5,7 @@ from pathlib import Path
 
 import jax.numpy as jnp
 
-from utils import TiktokenEncoder, load_checkpoint, save_checkpoint
+from jax_gpt.utils import TiktokenEncoder, load_checkpoint, save_checkpoint
 
 
 class TestTiktokenEncoder:
