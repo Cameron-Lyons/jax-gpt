@@ -16,25 +16,14 @@ Provides-Extra: data
 Requires-Dist: datasets>=2.20.0; extra == "data"
 Requires-Dist: requests>=2.31.0; extra == "data"
 Requires-Dist: tiktoken>=0.7.0; extra == "data"
-Requires-Dist: tqdm>=4.66.0; extra == "data"
 Provides-Extra: pretrained
 Requires-Dist: transformers>=4.40.0; extra == "pretrained"
 Requires-Dist: tiktoken>=0.7.0; extra == "pretrained"
-Provides-Extra: trainer
-Requires-Dist: orbax-checkpoint>=0.6.0; extra == "trainer"
-Provides-Extra: logging
-Requires-Dist: wandb>=0.17.0; extra == "logging"
-Provides-Extra: benchmark
-Requires-Dist: psutil>=5.9.0; extra == "benchmark"
 Provides-Extra: all
 Requires-Dist: datasets>=2.20.0; extra == "all"
-Requires-Dist: orbax-checkpoint>=0.6.0; extra == "all"
-Requires-Dist: psutil>=5.9.0; extra == "all"
 Requires-Dist: requests>=2.31.0; extra == "all"
 Requires-Dist: tiktoken>=0.7.0; extra == "all"
-Requires-Dist: tqdm>=4.66.0; extra == "all"
 Requires-Dist: transformers>=4.40.0; extra == "all"
-Requires-Dist: wandb>=0.17.0; extra == "all"
 Provides-Extra: dev
 Requires-Dist: pytest>=8.0; extra == "dev"
 Requires-Dist: pytest-xdist>=3.5.0; extra == "dev"
@@ -61,8 +50,11 @@ Add extras only for the features you need:
 ```bash
 pip install -e ".[data]"
 pip install -e ".[pretrained]"
-pip install -e ".[trainer]"
 ```
+
+- `.[tokenization]`: GPT-2 BPE tokenization without the full pretrained/data stack
+- `.[data]`: dataset download and preprocessing scripts
+- `.[pretrained]`: Hugging Face GPT-2 weight loading for pretrained init and sampling
 
 For a full development environment:
 
@@ -70,11 +62,13 @@ For a full development environment:
 pip install -e ".[all,dev]"
 ```
 
-If you prefer a pinned all-features environment, `requirements.txt` is still available.
+If you prefer a pinned all-features-plus-dev environment, `requirements.txt` is still available.
 
 For GPU support, install a JAX build that matches your CUDA setup.
 
 ## quick start
+
+Install `.[data]` if you want to run the dataset preparation scripts.
 
 Prepare the tiny Shakespeare character dataset:
 
@@ -190,8 +184,6 @@ summary = train(TrainConfig(dataset="shakespeare_char", out_dir="out-shakespeare
 samples = sample_texts(SampleConfig(out_dir="out-shakespeare-char", start="Hello"))
 ```
 
-For a more object-oriented training API, see `trainer.py` and `training_config.json`.
-
 ## project layout
 
 ```text
@@ -207,8 +199,6 @@ For a more object-oriented training API, see `trainer.py` and `training_config.j
 ├── sharding.py
 ├── tests/
 ├── train.py
-├── trainer.py
-├── training_config.json
 └── utils.py
 ```
 

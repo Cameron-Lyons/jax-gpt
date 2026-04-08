@@ -18,15 +18,11 @@ Add extras only for the features you need:
 ```bash
 pip install -e ".[data]"
 pip install -e ".[pretrained]"
-pip install -e ".[trainer]"
 ```
 
 - `.[tokenization]`: GPT-2 BPE tokenization without the full pretrained/data stack
 - `.[data]`: dataset download and preprocessing scripts
 - `.[pretrained]`: Hugging Face GPT-2 weight loading for pretrained init and sampling
-- `.[trainer]`: Orbax checkpoint support for `trainer.py`
-- `.[logging]`: Weights & Biases experiment logging
-- `.[benchmark]`: process memory reporting fallback in `benchmark.py`
 
 For a full development environment:
 
@@ -156,8 +152,6 @@ summary = train(TrainConfig(dataset="shakespeare_char", out_dir="out-shakespeare
 samples = sample_texts(SampleConfig(out_dir="out-shakespeare-char", start="Hello"))
 ```
 
-For a more object-oriented training API, see `trainer.py` and `training_config.json`.
-
 ## project layout
 
 ```text
@@ -173,8 +167,6 @@ For a more object-oriented training API, see `trainer.py` and `training_config.j
 ├── sharding.py
 ├── tests/
 ├── train.py
-├── trainer.py
-├── training_config.json
 └── utils.py
 ```
 

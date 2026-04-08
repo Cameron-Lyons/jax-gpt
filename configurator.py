@@ -49,9 +49,6 @@ class TrainConfig(BaseConfig):
     eval_only: bool = False
     always_save_checkpoint: bool = True
     init_from: str = "scratch"
-    wandb_log: bool = False
-    wandb_project: str = "jax-gpt"
-    wandb_run_name: str = "gpt2"
     dataset: str = "openwebtext"
     gradient_accumulation_steps: int = 40
     batch_size: int = 12

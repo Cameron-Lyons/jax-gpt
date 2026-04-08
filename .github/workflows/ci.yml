@@ -26,7 +26,7 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install -e ".[dev,pretrained]"
-      - run: mypy model.py gpt2.py parameter_converter.py train.py trainer.py benchmark.py sample.py utils.py configurator.py sharding.py
+      - run: mypy model.py gpt2.py parameter_converter.py train.py benchmark.py sample.py utils.py configurator.py sharding.py
 
   test:
     runs-on: ubuntu-latest

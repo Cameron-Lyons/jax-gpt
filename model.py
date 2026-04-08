@@ -1,17 +1,3 @@
-"""
-Improved GPT-2 model implementation for JAX with enhanced features.
-
-This implementation includes several improvements over the original:
-- Modern JAX/Flax best practices
-- JIT compilation for better performance
-- Enhanced attention mechanisms
-- Better initialization strategies
-- Improved generation capabilities
-- Type hints and comprehensive documentation
-- Memory-efficient operations
-- Advanced sampling strategies
-"""
-
 import math
 from typing import Any, Dict
 
@@ -30,6 +16,13 @@ from utils import (
     DEFAULT_GPT2_VOCAB_SIZE,
     get_gpt2_model_spec,
 )
+
+
+def cross_entropy_with_integer_labels(logits: jax.Array, labels: jax.Array) -> jax.Array:
+    """Compute per-example cross entropy without Optax/Chex dtype assertions."""
+    log_probs = jax.nn.log_softmax(logits, axis=-1)
+    gathered = jnp.take_along_axis(log_probs, labels.astype(jnp.int32)[..., None], axis=-1)
+    return -jnp.squeeze(gathered, axis=-1)
 
 
 @dataclass
@@ -380,7 +373,7 @@ class GPT(nn.Module):
             flat_logits = logits.reshape(-1, logits.shape[-1])
             flat_targets = targets.reshape(-1)
 
-            loss = optax.softmax_cross_entropy_with_integer_labels(flat_logits, flat_targets).mean()
+            loss = cross_entropy_with_integer_labels(flat_logits, flat_targets).mean()
 
         return logits, loss, new_caches if cache is not None else None
 

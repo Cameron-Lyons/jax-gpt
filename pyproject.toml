@@ -21,30 +21,16 @@ data = [
     "datasets>=2.20.0",
     "requests>=2.31.0",
     "tiktoken>=0.7.0",
-    "tqdm>=4.66.0",
 ]
 pretrained = [
     "transformers>=4.40.0",
     "tiktoken>=0.7.0",
 ]
-trainer = [
-    "orbax-checkpoint>=0.6.0",
-]
-logging = [
-    "wandb>=0.17.0",
-]
-benchmark = [
-    "psutil>=5.9.0",
-]
 all = [
     "datasets>=2.20.0",
-    "orbax-checkpoint>=0.6.0",
-    "psutil>=5.9.0",
     "requests>=2.31.0",
     "tiktoken>=0.7.0",
-    "tqdm>=4.66.0",
     "transformers>=4.40.0",
-    "wandb>=0.17.0",
 ]
 dev = [
     "pytest>=8.0",
@@ -59,7 +45,7 @@ jax-gpt-sample = "sample:main"
 jax-gpt-benchmark = "benchmark:main"
 
 [tool.setuptools]
-py-modules = ["model", "gpt2", "parameter_converter", "train", "trainer", "benchmark", "sample", "utils", "configurator", "sharding"]
+py-modules = ["model", "gpt2", "parameter_converter", "train", "benchmark", "sample", "utils", "configurator", "sharding"]
 
 [build-system]
 requires = ["setuptools>=68.0"]

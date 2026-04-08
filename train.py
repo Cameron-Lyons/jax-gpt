@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import importlib
 import pickle
 import time
 from dataclasses import asdict, dataclass, replace
@@ -412,15 +411,6 @@ def train(config: TrainConfig) -> dict[str, Any]:
             compile_enabled=config.compile,
         )
 
-        wandb_module: Any | None = None
-        if config.wandb_log:
-            wandb_module = importlib.import_module("wandb")
-            wandb_module.init(
-                project=config.wandb_project,
-                name=config.wandb_run_name,
-                config=config.to_dict(),
-            )
-
         print(f"Using device: {device}")
         print(f"Loading dataset from: {dataset.dataset_dir}")
         print(f"Model config: {artifacts.model_config}")
@@ -445,16 +435,6 @@ def train(config: TrainConfig) -> dict[str, Any]:
                     f"step {artifacts.iter_num}: "
                     f"train loss {losses['train']:.4f}, val loss {losses['val']:.4f}"
                 )
-
-                if wandb_module is not None:
-                    wandb_module.log(
-                        {
-                            "iter": artifacts.iter_num,
-                            "train/loss": losses["train"],
-                            "val/loss": losses["val"],
-                            "lr": current_lr,
-                        }
-                    )
 
                 if losses["val"] < artifacts.best_val_loss:
                     artifacts.best_val_loss = losses["val"]

@@ -8,7 +8,6 @@ pyproject.toml
 sample.py
 sharding.py
 train.py
-trainer.py
 utils.py
 jax_gpt.egg-info/PKG-INFO
 jax_gpt.egg-info/SOURCES.txt
@@ -26,5 +25,4 @@ tests/test_sample.py
 tests/test_sharding.py
 tests/test_train.py
 tests/test_train_pipeline.py
-tests/test_trainer.py
 tests/test_utils.py

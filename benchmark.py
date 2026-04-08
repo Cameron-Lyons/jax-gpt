@@ -226,20 +226,14 @@ class BenchmarkRunner:
                 print(f"{name} memory: {memory_used:.2f}MB")
 
     def get_memory_usage(self) -> Optional[float]:
-        """Get current device memory usage in MB."""
+        """Get current device memory usage in MB, if available."""
         try:
             stats = jax.devices()[0].memory_stats()
             if stats is not None:
                 return float(stats.get("bytes_in_use", 0)) / 1024 / 1024
         except Exception:
             pass
-        try:
-            import psutil
-
-            process = psutil.Process()
-            return float(process.memory_info().rss) / 1024 / 1024
-        except ImportError:
-            return None
+        return None
 
     def benchmark_forward_pass(self) -> Dict[str, Any]:
         """Benchmark forward pass performance."""
