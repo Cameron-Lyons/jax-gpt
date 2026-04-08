@@ -5,7 +5,7 @@ import jax.numpy as jnp
 import pytest
 from jax import random
 
-from model import GPT, GPTConfig, generate
+from jax_gpt.model import GPT, GPTConfig, generate
 
 
 @pytest.fixture

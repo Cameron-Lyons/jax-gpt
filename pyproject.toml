@@ -40,12 +40,12 @@ dev = [
 ]
 
 [project.scripts]
-jax-gpt-train = "train:main"
-jax-gpt-sample = "sample:main"
-jax-gpt-benchmark = "benchmark:main"
+jax-gpt-train = "jax_gpt.train:main"
+jax-gpt-sample = "jax_gpt.sample:main"
+jax-gpt-benchmark = "jax_gpt.benchmark:main"
 
-[tool.setuptools]
-py-modules = ["model", "gpt2", "parameter_converter", "train", "benchmark", "sample", "utils", "configurator", "sharding"]
+[tool.setuptools.packages.find]
+include = ["jax_gpt", "jax_gpt.*"]
 
 [build-system]
 requires = ["setuptools>=68.0"]

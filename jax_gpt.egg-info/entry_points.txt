@@ -1,4 +1,4 @@
 [console_scripts]
-jax-gpt-benchmark = benchmark:main
-jax-gpt-sample = sample:main
-jax-gpt-train = train:main
+jax-gpt-benchmark = jax_gpt.benchmark:main
+jax-gpt-sample = jax_gpt.sample:main
+jax-gpt-train = jax_gpt.train:main

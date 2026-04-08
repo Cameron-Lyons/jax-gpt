@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from configurator import parse_sample_config, parse_train_config
+from jax_gpt.config import parse_sample_config, parse_train_config
 
 
 def test_parse_train_config_from_python_file(tmp_path: Path) -> None:

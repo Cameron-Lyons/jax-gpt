@@ -28,7 +28,7 @@ def rng():
 
 @pytest.fixture
 def small_config():
-    from model import GPTConfig
+    from jax_gpt.model import GPTConfig
 
     return GPTConfig(
         n_layer=2,

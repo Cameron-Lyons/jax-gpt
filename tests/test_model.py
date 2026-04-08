@@ -3,7 +3,7 @@ import jax.numpy as jnp
 import pytest
 from jax import random
 
-from model import GPT, GPTConfig, configure_optimizers, get_model_size_mb, get_num_params
+from jax_gpt.model import GPT, GPTConfig, configure_optimizers, get_model_size_mb, get_num_params
 
 
 @pytest.fixture

@@ -8,10 +8,10 @@ from pathlib import Path
 
 import numpy as np
 
-from configurator import SampleConfig, TrainConfig
-from sample import sample_texts
-from train import train
-from utils import load_training_checkpoint
+from jax_gpt.config import SampleConfig, TrainConfig
+from jax_gpt.sample import sample_texts
+from jax_gpt.train import train
+from jax_gpt.utils import load_training_checkpoint
 
 
 def write_toy_dataset(root: Path, dataset_name: str = "toy") -> Path:

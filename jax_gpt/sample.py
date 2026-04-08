@@ -10,11 +10,12 @@ import jax
 import jax.numpy as jnp
 from jax import random
 
-from configurator import SampleConfig, parse_sample_config
-from model import GPT, GPTConfig, generate
-from parameter_converter import convert_functional_to_flax_params
-from train import checkpoint_path, model_config_from_checkpoint
-from utils import (
+from .checkpoints import checkpoint_path, model_config_from_checkpoint
+from .config import SampleConfig, parse_sample_config
+from .data import dataset_dir
+from .model import GPT, GPTConfig, generate
+from .parameter_converter import convert_functional_to_flax_params
+from .utils import (
     TiktokenEncoder,
     get_gpt2_model_size,
     load_encoder_hparams_and_params,
@@ -61,7 +62,7 @@ def tokenizer_for_resume(config: SampleConfig, checkpoint: dict[str, Any]) -> To
     """Pick the best tokenizer for a resumed checkpoint."""
     dataset = checkpoint.get("dataset", "openwebtext")
     data_dir = checkpoint.get("data_dir", config.data_dir)
-    meta_path = Path(data_dir) / dataset / "meta.pkl"
+    meta_path = dataset_dir(data_dir, dataset) / "meta.pkl"
     if meta_path.exists():
         print(f"Loading tokenizer metadata from {meta_path}")
         return load_meta_tokenizer(meta_path)

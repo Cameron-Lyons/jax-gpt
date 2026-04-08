@@ -3,6 +3,8 @@ Comprehensive benchmarking suite for JAX GPT-2 models.
 Supports multiple scenarios, performance analysis, and detailed metrics.
 """
 
+from __future__ import annotations
+
 import argparse
 import json
 import statistics
@@ -18,8 +20,9 @@ import numpy as np
 import optax
 from jax import jit, random, value_and_grad
 
-from model import GPT, GPTConfig
-from utils import (
+from .data import resolve_train_data_path
+from .model import GPT, GPTConfig
+from .utils import (
     DEFAULT_BENCHMARK_PEAK_FLOPS,
     DEFAULT_GPT2_BLOCK_SIZE,
     DEFAULT_GPT2_VOCAB_SIZE,
@@ -128,16 +131,11 @@ class BenchmarkRunner:
 
     def setup_real_data(self):
         """Setup real data loading."""
-        candidate_paths = [
-            Path(self.config.data_dir) / self.config.dataset / "train.bin",
-            Path(self.config.data_dir) / "train.bin",
-        ]
-
-        for train_path in candidate_paths:
-            if train_path.exists():
-                self.train_data = np.memmap(train_path, dtype=np.uint16, mode="r")
-                print(f"Loaded real data: {len(self.train_data):,} tokens from {train_path}")
-                return
+        train_path = resolve_train_data_path(self.config.data_dir, self.config.dataset)
+        if train_path is not None:
+            self.train_data = np.memmap(train_path, dtype=np.uint16, mode="r")
+            print(f"Loaded real data: {len(self.train_data):,} tokens from {train_path}")
+            return
 
         print("Warning: Real data not found, falling back to synthetic data")
         self.config.use_real_data = False

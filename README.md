@@ -42,7 +42,7 @@ Prepare the tiny Shakespeare character dataset:
 
 ```bash
 python data/shakespeare_char/prepare.py
-python train.py config/train_shakespeare_char.py
+python -m jax_gpt.train config/train_shakespeare_char.py
 ```
 
 You can also use the installed console script:
@@ -54,7 +54,7 @@ jax-gpt-train config/train_shakespeare_char.py
 Sample from the latest checkpoint:
 
 ```bash
-python sample.py --out_dir=out-shakespeare-char --start="To be"
+python -m jax_gpt.sample --out_dir=out-shakespeare-char --start="To be"
 ```
 
 ## training
@@ -63,20 +63,20 @@ Train GPT-2 124M on OpenWebText:
 
 ```bash
 python data/openwebtext/prepare.py
-python train.py config/train_gpt2.py
+python -m jax_gpt.train config/train_gpt2.py
 ```
 
 Finetune from pretrained GPT-2 weights:
 
 ```bash
 python data/shakespeare/prepare.py
-python train.py config/finetune_shakespeare.py
+python -m jax_gpt.train config/finetune_shakespeare.py
 ```
 
 Resume a previous run with optimizer state intact:
 
 ```bash
-python train.py --init_from=resume --out_dir=out-shakespeare-char
+python -m jax_gpt.train --init_from=resume --out_dir=out-shakespeare-char
 ```
 
 ## sampling
@@ -84,27 +84,27 @@ python train.py --init_from=resume --out_dir=out-shakespeare-char
 Sample from a local checkpoint:
 
 ```bash
-python sample.py --init_from=resume --out_dir=out-shakespeare-char --start="FILE:prompt.txt"
+python -m jax_gpt.sample --init_from=resume --out_dir=out-shakespeare-char --start="FILE:prompt.txt"
 ```
 
 Sample from pretrained GPT-2 variants:
 
 ```bash
-python sample.py --init_from=gpt2 --start="The future of AI is"
-python sample.py --init_from=gpt2-medium
-python sample.py --init_from=gpt2-large
-python sample.py --init_from=gpt2-xl
+python -m jax_gpt.sample --init_from=gpt2 --start="The future of AI is"
+python -m jax_gpt.sample --init_from=gpt2-medium
+python -m jax_gpt.sample --init_from=gpt2-large
+python -m jax_gpt.sample --init_from=gpt2-xl
 ```
 
-`sample.py` supports both `top_k` and `top_p` controls:
+`jax_gpt.sample` supports both `top_k` and `top_p` controls:
 
 ```bash
-python sample.py --init_from=gpt2 --top_k=None --top_p=0.9 --temperature=0.7
+python -m jax_gpt.sample --init_from=gpt2 --top_k=None --top_p=0.9 --temperature=0.7
 ```
 
 ## configuration
 
-`train.py` and `sample.py` accept:
+`jax_gpt.train` and `jax_gpt.sample` accept:
 
 1. A config file as the first argument.
 2. `--key=value` overrides after that.
@@ -112,8 +112,8 @@ python sample.py --init_from=gpt2 --top_k=None --top_p=0.9 --temperature=0.7
 Examples:
 
 ```bash
-python train.py config/train_shakespeare_char.py --batch_size=32 --learning_rate=1e-4
-python sample.py config/eval_gpt2.py --top_p=0.95
+python -m jax_gpt.train config/train_shakespeare_char.py --batch_size=32 --learning_rate=1e-4
+python -m jax_gpt.sample config/eval_gpt2.py --top_p=0.95
 ```
 
 Supported config file types:
@@ -128,7 +128,7 @@ The old `exec`-based configuration flow is gone, so config files are now safer a
 Run the benchmark suite:
 
 ```bash
-python benchmark.py --model_size 124M --device cpu --use_synthetic_data --no_save
+python -m jax_gpt.benchmark --model_size 124M --device cpu --use_synthetic_data --no_save
 ```
 
 Or with the installed entrypoint:
@@ -144,9 +144,9 @@ Real-data benchmarking reads `train.bin` from `data/<dataset>/train.bin`.
 The scripts are also importable:
 
 ```python
-from configurator import SampleConfig, TrainConfig
-from sample import sample_texts
-from train import train
+from jax_gpt.config import SampleConfig, TrainConfig
+from jax_gpt.sample import sample_texts
+from jax_gpt.train import train
 
 summary = train(TrainConfig(dataset="shakespeare_char", out_dir="out-shakespeare-char"))
 samples = sample_texts(SampleConfig(out_dir="out-shakespeare-char", start="Hello"))
@@ -156,18 +156,11 @@ samples = sample_texts(SampleConfig(out_dir="out-shakespeare-char", start="Hello
 
 ```text
 .
-├── benchmark.py
-├── configurator.py
 ├── config/
 ├── data/
-├── gpt2.py
-├── model.py
-├── parameter_converter.py
-├── sample.py
-├── sharding.py
+├── jax_gpt/
 ├── tests/
-├── train.py
-└── utils.py
+└── README.md
 ```
 
 ## testing

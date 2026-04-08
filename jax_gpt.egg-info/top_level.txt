@@ -1,9 +1,1 @@
-benchmark
-configurator
-gpt2
-model
-parameter_converter
-sample
-sharding
-train
-utils
+jax_gpt

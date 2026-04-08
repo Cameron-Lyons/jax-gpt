@@ -10,7 +10,7 @@ from flax import linen as nn
 from flax.struct import dataclass
 from jax import random
 
-from utils import (
+from .utils import (
     CAUSAL_MASK_FILL_VALUE,
     DEFAULT_GPT2_BLOCK_SIZE,
     DEFAULT_GPT2_VOCAB_SIZE,

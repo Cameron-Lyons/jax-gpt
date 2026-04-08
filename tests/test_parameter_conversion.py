@@ -3,8 +3,8 @@ import jax.numpy as jnp
 import pytest
 from jax import random
 
-from model import GPT, GPTConfig
-from parameter_converter import (
+from jax_gpt.model import GPT, GPTConfig
+from jax_gpt.parameter_converter import (
     convert_flax_to_functional_params,
     convert_functional_to_flax_params,
 )
@@ -98,7 +98,7 @@ class TestFlaxToFunctional:
 @pytest.mark.network
 class TestPretrainedConversion:
     def test_pretrained_roundtrip(self):
-        from utils import load_encoder_hparams_and_params
+        from jax_gpt.utils import load_encoder_hparams_and_params
 
         encoder, hparams, functional_params = load_encoder_hparams_and_params("124M")
 

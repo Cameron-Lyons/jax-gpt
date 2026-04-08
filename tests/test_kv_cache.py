@@ -4,7 +4,7 @@ import jax.numpy as jnp
 import pytest
 from jax import random
 
-from model import GPT, GPTConfig, generate, init_kv_cache
+from jax_gpt.model import GPT, GPTConfig, generate, init_kv_cache
 
 
 @pytest.fixture
