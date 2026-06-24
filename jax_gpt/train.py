@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import asdict, dataclass, replace
+from pathlib import Path
 from typing import Any, cast
 
 import jax
@@ -275,8 +276,7 @@ def maybe_evaluate_and_checkpoint(
         rng=artifacts.rng,
     )
     print(
-        f"step {artifacts.iter_num}: "
-        f"train loss {losses['train']:.4f}, val loss {losses['val']:.4f}"
+        f"step {artifacts.iter_num}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}"
     )
 
     if losses["val"] < artifacts.best_val_loss:

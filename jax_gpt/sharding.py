@@ -46,4 +46,4 @@ def shard_batch(
 
 def get_num_devices() -> int:
     """Return the number of available JAX devices."""
-    return jax.device_count()
+    return int(jax.device_count())
