@@ -29,7 +29,7 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install -e ".[dev,pretrained]"
-      - run: mypy model.py gpt2.py parameter_converter.py train.py benchmark.py sample.py utils.py configurator.py sharding.py
+      - run: mypy jax_gpt/model.py jax_gpt/gpt2.py jax_gpt/parameter_converter.py jax_gpt/train.py jax_gpt/benchmark.py jax_gpt/sample.py jax_gpt/utils.py jax_gpt/config.py jax_gpt/sharding.py
 
   test:
     runs-on: ubuntu-latest

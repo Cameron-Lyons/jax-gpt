@@ -1,4 +1,5 @@
 import math
+from dataclasses import dataclass, replace
 from typing import Any, Dict, cast
 
 import flax
@@ -7,7 +8,7 @@ import jax
 import jax.numpy as jnp
 import optax
 from flax import linen as nn
-from flax.struct import dataclass
+from flax.struct import dataclass as struct_dataclass
 from jax import random
 
 from .utils import (
@@ -50,8 +51,11 @@ class GPTConfig:
     scale_attn_by_inverse_layer_idx: bool = False
     reorder_and_upcast_attn: bool = False
 
+    def replace(self, **kwargs: Any) -> "GPTConfig":
+        return replace(self, **kwargs)
 
-@dataclass
+
+@struct_dataclass
 class KVCache:
     """Pre-allocated key/value cache for autoregressive generation."""
 
@@ -74,7 +78,7 @@ def init_kv_cache(
         k = jnp.zeros((batch_size, n_head, max_seq_len, head_dim), dtype=dtype)
         v = jnp.zeros((batch_size, n_head, max_seq_len, head_dim), dtype=dtype)
         length = jnp.array(0, dtype=jnp.int32)
-        caches.append(KVCache(k=k, v=v, length=length))
+        caches.append(KVCache(k=k, v=v, length=length))  # type: ignore[call-arg]
     return caches
 
 
@@ -161,7 +165,7 @@ class CausalSelfAttention(nn.Module):
             cache_len = cache.length
             k_cache = cache.k.at[:, :, cache_len : cache_len + T, :].set(k)
             v_cache = cache.v.at[:, :, cache_len : cache_len + T, :].set(v)
-            new_cache = KVCache(k=k_cache, v=v_cache, length=cache_len + T)
+            new_cache = KVCache(k=k_cache, v=v_cache, length=cache_len + T)  # type: ignore[call-arg]
 
             k = k_cache[:, :, : cache_len + T, :]
             v = v_cache[:, :, : cache_len + T, :]
