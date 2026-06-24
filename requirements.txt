@@ -1,4 +1,4 @@
-jax==0.9.2
+jax==0.10.2
 jaxlib==0.10.2
 
 transformers==5.5.0
