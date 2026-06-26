@@ -5,7 +5,7 @@ transformers==5.5.0
 requests==2.34.2
 
 optax==0.2.8
-flax==0.12.6
+flax==0.12.7
 
 numpy==2.4.4
 
