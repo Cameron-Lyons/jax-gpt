@@ -19,7 +19,6 @@ tokenization = [
 ]
 data = [
     "datasets>=2.20.0",
-    "requests>=2.31.0",
     "tiktoken>=0.7.0",
 ]
 pretrained = [
@@ -28,7 +27,6 @@ pretrained = [
 ]
 all = [
     "datasets>=2.20.0",
-    "requests>=2.31.0",
     "tiktoken>=0.7.0",
     "transformers>=5.5.0",
 ]

@@ -25,6 +25,7 @@ tests/test_kv_cache.py
 tests/test_model.py
 tests/test_parameter_conversion.py
 tests/test_sample.py
+tests/test_shakespeare_prepare.py
 tests/test_sharding.py
 tests/test_train.py
 tests/test_train_pipeline.py

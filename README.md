@@ -36,7 +36,13 @@ For GPU support, install a JAX build that matches your CUDA setup.
 
 ## quick start
 
-Install `.[data]` if you want to run the dataset preparation scripts.
+The character-level Shakespeare script only needs the base installation. Install
+`.[tokenization]` for Shakespeare BPE preparation or `.[data]` for OpenWebText.
+
+Shakespeare downloads use Python's `urllib.request` with the system's trusted CA
+certificates and standard `http_proxy`, `https_proxy`, and `no_proxy` settings.
+For a custom CA bundle, set `SSL_CERT_FILE` (instead of `REQUESTS_CA_BUNDLE`).
+HTTP errors stop preparation without caching the error response as `input.txt`.
 
 Prepare the tiny Shakespeare character dataset:
 
