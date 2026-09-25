@@ -7,6 +7,7 @@ This is suitable for fine-tuning pretrained GPT-2 models.
 import importlib
 import os
 from typing import Any
+from urllib.request import urlopen
 
 import numpy as np
 
@@ -23,12 +24,13 @@ def _load_data_dependency(module_name: str) -> Any:
 # download the tiny shakespeare dataset
 input_file_path = os.path.join(os.path.dirname(__file__), "input.txt")
 if not os.path.exists(input_file_path):
-    requests = _load_data_dependency("requests")
     data_url = (
         "https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt"
     )
+    with urlopen(data_url) as response:
+        text = response.read().decode("utf-8")
     with open(input_file_path, "w", encoding="utf-8") as f:
-        f.write(requests.get(data_url).text)
+        f.write(text)
 
 with open(input_file_path, "r", encoding="utf-8") as f:
     data = f.read()
