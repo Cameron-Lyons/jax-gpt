@@ -1,7 +1,7 @@
 jax==0.10.2
 jaxlib==0.10.2
 
-transformers==5.20.2
+transformers==5.21.0
 
 optax==0.2.8
 flax==0.12.8
