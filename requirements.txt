@@ -3,7 +3,7 @@ jaxlib==0.10.2
 
 transformers==5.22.2
 
-optax==0.2.8
+optax==0.2.9
 flax==0.12.8
 
 numpy==2.4.6
